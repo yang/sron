@@ -2,16 +2,17 @@ package edu.cmu.nuron;
 
 import java.io.DataOutputStream;
 import java.io.ObjectInputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.ArrayList;
 import java.util.concurrent.Semaphore;
 
 import edu.cmu.nuron.msg.InitMsg;
 import edu.cmu.nuron.msg.RoutingMsg;
 
-public class RonNode extends Thread {
+public class RonNode extends Thread implements IRonNode {
 	int iNodeId;
 	boolean bCoordinator;
 	String sCoordinatorIp;
@@ -25,8 +26,9 @@ public class RonNode extends Thread {
 	int[] forwardingTable; // contains the ids of the next hop nodes to reach the i's node
 	int[] minCostForwardingTable; // contains cost to reach i'th node, using the next hop nodes in the forwarding table.
 	
-	Semaphore semDone;
-	Semaphore semGo;
+	Semaphore semDone;	// semaphore used to signal that RUST thread has quit
+	Semaphore semGo;	// semaphore used to signal that the intial table sent from the co-ordinator has been received.
+	Semaphore semAllJoined;
 	
 	boolean bGotFirstRoutingUpdate;
 
@@ -43,6 +45,7 @@ public class RonNode extends Thread {
 		allTableLock = new Integer(1);
 		semDone = new Semaphore(0);
 		semGo = new Semaphore(0);
+		semAllJoined = new Semaphore(0);
 		
 		bGotFirstRoutingUpdate = false;
 		
@@ -56,12 +59,10 @@ public class RonNode extends Thread {
 	public void run() {
 		boolean done = false;
 
-		if (!bCoordinator) {
-			// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
-			RoutingUpdateServerThread rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, numNodes, this);
-			rust.start();
-			//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
-		}
+		// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
+		RoutingUpdateServerThread rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, numNodes, numNodes - 1, this);
+		rust.start();
+		//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 
 		// if you are a co-oridinator wait for (n-1) other nodes to connect
 		if (bCoordinator) {
@@ -92,31 +93,25 @@ public class RonNode extends Thread {
 				//System.out.println("---> " + printForwardingTable());
 				
 				//System.out.println(iNodeId + " waiting for others to join the party");
-				Semaphore semAllClientsConnected = new Semaphore(0);
 				// wait for all the nodes to join!
 				while(numConnected < (numNodes -1)) {
 					Socket incoming = ss.accept();
 					numConnected++;
 					// co-ordinator assigns node id to the connecting end-point
-					ClientHandlerThread worker = new ClientHandlerThread(incoming, this, numNodes, semAllClientsConnected);
+					ClientHandlerThread worker = new ClientHandlerThread(incoming, this, numNodes);
 					worker.start();
 				}
 				ss.close();
-	            
-				// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
-				RoutingUpdateServerThread rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, numNodes, this);
-				rust.start();
-				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 
+				while (numJoins < (numNodes -1)) {
+					try {
+						semAllJoined.acquire();
+					} catch (InterruptedException ie) {
+						ie.printStackTrace();
+					}
+				}
+				
 				// wait for all workers to exit.
-	    		do {
-    				synchronized(numJoinsLock) {
-    					if (numJoins == (numNodes -1)) {
-    						done = true;
-    						semAllClientsConnected.release(numNodes - 1);
-    					}
-    				}
-	    		} while (!done);
 				
 				semGo.release();
 				//System.out.println(iNodeId + " everyone joined the party");
@@ -192,6 +187,7 @@ public class RonNode extends Thread {
 		
 		////////////////////////////////////////////////////////////////////////////////
 		
+		//System.out.println(iNodeId + " going into sending mode.");
 		boolean bDone = false;
 		double routingBandwidth = 0;
 		while(!bDone) {
@@ -204,20 +200,19 @@ public class RonNode extends Thread {
 					
 					try {
 						String i_ip = InetAddress.getLocalHost().getHostAddress();
+						InetAddress i_ia = InetAddress.getLocalHost();
 						//System.out.println(iNodeId + " trying to send adjecency table to " + i_ip + ":" + (iCoordinatorPort + i));
-						Socket s = new Socket(i_ip, (iCoordinatorPort + i));
-						DataOutputStream writer = new DataOutputStream(s.getOutputStream());
 						
 						RoutingMsg rm = new RoutingMsg(iNodeId, numNodes);
 						synchronized(allTableLock) {
 							rm.populateProbeTable(probeTable[iNodeId]);
 						}
-						byte[] b = rm.getBytes(rm);
-						writer.write(b, 0, b.length);
+						byte[] b = RoutingMsg.getBytes(rm);
+						DatagramPacket dp = new DatagramPacket(b, b.length, i_ia, (iCoordinatorPort + i)); 
+						DatagramSocket s = new DatagramSocket();
+						s.send(dp);
 	
 						routingBandwidth += b.length;
-						
-						writer.close();
 						s.close();
 					} catch(Exception e) {
 						System.out.println(iNodeId + ":" + (iCoordinatorPort + i));
@@ -235,8 +230,11 @@ public class RonNode extends Thread {
 			
 		}
 		
-		String pretty_output = "{" + iNodeId + "} Routing Banwidth Overhead = " + routingBandwidth + " bytes";
-		//System.out.println(pretty_output);
+		if (iNodeId == 0) {
+			//String pretty_output = "{" + iNodeId + "} Routing Banwidth Overhead = " + routingBandwidth + " bytes, numNodes = " + numNodes;
+			String pretty_output = numNodes + "\t" + routingBandwidth;
+			System.out.println(pretty_output);
+		}
 	}
 	
 	public void populateInitProbeTable(InitMsg im) {
@@ -251,7 +249,10 @@ public class RonNode extends Thread {
 	public void doneJoiningOverlay() {
 		synchronized(numJoinsLock) {
 			numJoins += 1;
-			System.out.println(numJoins.intValue() + " nodes joined the overlay!");
+			//System.out.println(numJoins.intValue() + " nodes joined the overlay!");
+			if (numJoins == (numNodes -1)) {
+				semAllJoined.release();
+			}
 		}
 	}
 	
@@ -268,6 +269,8 @@ public class RonNode extends Thread {
 		}
 	}
 
+	
+	// revisits best 1-hop to all nodes based in this routing update
 	private void updateForwardingTable(RoutingMsg rm) {
 		synchronized(allTableLock) {
 			for(int i = 0; i< numNodes; i++) {

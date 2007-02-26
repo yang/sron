@@ -54,7 +54,7 @@ public class RonTest {
 	public static void main(String[] args) throws Exception {
 		
 		sExpInterfaceIp = InetAddress.getLocalHost().getHostAddress();
-		System.out.println("IP = " + sExpInterfaceIp);
+		//System.out.println("IP = " + sExpInterfaceIp);
 		if (sExpInterfaceIp != null) {
 			RonTest rn = new RonTest();
 
@@ -71,16 +71,25 @@ public class RonTest {
 				//rn.iCoOrdinatorServerPort = 8000;
 	        }
 			
-			rn.printProperties();
+			//rn.printProperties();
 			
-			if (!rn.isPerfectSquare(rn.iNumNodes)) {
-				System.out.println("Note :: Number of nodes should be a perfect square.");
-				System.exit(0);
-			}
+			
+			if (rn.bUseQuorum) {
+				if (!rn.isPerfectSquare(rn.iNumNodes)) {
+					System.out.println("Note :: Number of nodes should be a perfect square.");
+					System.exit(0);
+				}
 
-			for (int i = 0; i < rn.iNumNodes; i++) {
-				RonNode node = new RonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
-				node.start();
+				for (int i = 0; i < rn.iNumNodes; i++) {
+					NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
+					node.start();
+				}
+			}
+			else {
+				for (int i = 0; i < rn.iNumNodes; i++) {
+					RonNode node = new RonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
+					node.start();
+				}
 			}
 		}
 	}

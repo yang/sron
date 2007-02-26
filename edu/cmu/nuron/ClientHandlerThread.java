@@ -1,34 +1,28 @@
 package edu.cmu.nuron;
 
 import java.io.BufferedReader;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
-import java.util.concurrent.Semaphore;
 
 import edu.cmu.nuron.msg.InitMsg;
 
 public class ClientHandlerThread extends Thread {
 
 	Socket incoming;
-	RonNode parent;
+	IRonNode parent;
 	int numNodes;
 	int otherEndPointNodeId;
 	InitMsg im;
 
 	String otherEndPointIp;
 
-	Semaphore semDone;
-	
-	public ClientHandlerThread(Socket connection, RonNode my_parent, int num_nodes, Semaphore sem_done) {
+	public ClientHandlerThread(Socket connection, IRonNode my_parent, int num_nodes) {
 		incoming = connection;
 		parent = my_parent;
 		numNodes = num_nodes;
 		otherEndPointIp ="";
-		semDone = sem_done;
 	}
 	
 	public void run() {
@@ -61,13 +55,6 @@ public class ClientHandlerThread extends Thread {
 
 			parent.doneJoiningOverlay();
 			
-//			// co-ordinator releases this once all the folks have connected to it.
-//			try {
-//				semDone.acquire();
-//			} catch (InterruptedException ie) {
-//				
-//			}
-
 		    //System.out.println("Done!");
 			reader.close();
 			writer.close();

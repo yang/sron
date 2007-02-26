@@ -4,9 +4,11 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.Serializable;
 
-public class RoutingMsg implements Serializable {
+/*
+ * Represents Adjecency/Probe Table for a node identified by the field "id".
+ */
+public class RoutingMsg extends BaseMsg {
 	int id; // routing msg from node with this id
 	int[] probeTable;
 	int numNodes;
@@ -14,6 +16,7 @@ public class RoutingMsg implements Serializable {
 	static 	ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
 	public RoutingMsg(int identifier, int num_nodes) {
+		msgType = BaseMsg.ROUTING_MSG_TYPE;
 		id = identifier;
 		probeTable = new int[num_nodes];
 		numNodes = num_nodes;
@@ -57,6 +60,7 @@ public class RoutingMsg implements Serializable {
 	public static byte[] getBytes(RoutingMsg rm) throws java.io.IOException{
 	    ByteArrayOutputStream bos = new ByteArrayOutputStream();
 	    DataOutputStream dos = new DataOutputStream(bos);
+	    dos.writeInt(rm.msgType);
 	    dos.writeInt(rm.id);
 	    dos.writeInt(rm.numNodes);
 	    for(int i = 0; i < rm.numNodes; i++) {
@@ -72,6 +76,7 @@ public class RoutingMsg implements Serializable {
 	public static RoutingMsg getObject(byte[] b) throws Exception {
 	    ByteArrayInputStream bis = new ByteArrayInputStream(b);
 	    DataInputStream dis = new DataInputStream(bis);
+	    int msgType = dis.readInt();
 	    int id = dis.readInt();
 	    int numNodes = dis.readInt();
 	    RoutingMsg rm = new RoutingMsg(id, numNodes);

@@ -8,9 +8,9 @@ import java.net.SocketTimeoutException;
 import java.util.concurrent.Semaphore;
 
 import edu.cmu.nuron.msg.BaseMsg;
-import edu.cmu.nuron.msg.RoutingMsg;
+import edu.cmu.nuron.msg.HitsGraphBestHopMsg;
 
-public class RoutingUpdateServerThread extends Thread {
+public class RecoUpdateServerThread extends Thread {
 	
 	int iPort;
 	int iNodeId;
@@ -18,17 +18,17 @@ public class RoutingUpdateServerThread extends Thread {
 	int numNodes;
 	int numNeighbors;
 	
-	int sizeOfRoutingUpdate;
+	int sizeOfUpdate;
 	
 	IRonNode parentHandle;
 	
-	RoutingUpdateServerThread(int port, int node_id, int num_nodes, int num_neighbors, IRonNode rn) {
+	RecoUpdateServerThread(int port, int node_id, int num_nodes, int num_neighbors, IRonNode rn) {
 		iPort = port;
 		iNodeId = node_id;
 		bQuit = false;
 		numNodes = num_nodes;
 		numNeighbors = num_neighbors;
-		sizeOfRoutingUpdate = 0;
+		sizeOfUpdate = 0;
 		parentHandle = rn;
 	}
 
@@ -41,9 +41,9 @@ public class RoutingUpdateServerThread extends Thread {
 			
 			int i = 0;
 
-			RoutingMsg rm = new RoutingMsg(iNodeId, numNodes);
-			byte []b = RoutingMsg.getBytes(rm);
-			sizeOfRoutingUpdate = b.length;
+			HitsGraphBestHopMsg bhm = new HitsGraphBestHopMsg(iNodeId, numNeighbors);
+			byte []b = HitsGraphBestHopMsg.getBytes(bhm);
+			sizeOfUpdate = b.length;
 			DatagramPacket dp = new DatagramPacket(b, b.length);
 			int j = 0;
 
@@ -53,33 +53,24 @@ public class RoutingUpdateServerThread extends Thread {
 				try {
 					ds.receive(dp);
 					i++;
-					//System.out.println(iNodeId + " RUST - incoming adjecency table!");
 					//System.out.println(iNodeId + " RUST - incoming table!");
 	
-					if (numNeighbors == (numNodes - 1)) {
-						// TODO :: check that the length is the same as b.length
-						RoutingMsg rm1  = RoutingMsg.getObject(dp.getData());
-						
-						RoutingUpdateHandlerThread ruht = new RoutingUpdateHandlerThread(rm1, iNodeId, parentHandle, completionSemaphore);
-						ruht.start();
+					// TODO :: check that the length is the same as b.length
+					byte[] msg = dp.getData();
+				    ByteArrayInputStream bis = new ByteArrayInputStream(msg);
+				    DataInputStream dis = new DataInputStream(bis);
+				    int type = dis.readInt();
+					dis.close();
+					bis.close();
+
+					if (type == BaseMsg.BESTHOP_RECOMMENDATION_MSG_TYPE) {
+						//System.out.println("{" + iNodeId + "} got msg of Type " + type + " and length " + msg.length);
+						HitsGraphBestHopMsg bhm1  = HitsGraphBestHopMsg.getObject(msg);
+						BestHopUpdateHandlerThread bhuht = new BestHopUpdateHandlerThread(bhm1, iNodeId, parentHandle, completionSemaphore);
+						bhuht.start();
 					}
 					else {
-						// TODO :: check that the length is the same as b.length
-						byte[] msg = dp.getData();
-					    ByteArrayInputStream bis = new ByteArrayInputStream(msg);
-					    DataInputStream dis = new DataInputStream(bis);
-					    int type = dis.readInt();
-						dis.close();
-						bis.close();
-
-						if (type == BaseMsg.ROUTING_MSG_TYPE) {
-							RoutingMsg rm1  = RoutingMsg.getObject(msg);
-							RoutingUpdateHandlerThread ruht = new RoutingUpdateHandlerThread(rm1, iNodeId, parentHandle, completionSemaphore);
-							ruht.start();
-						}
-						else {
-							System.out.println("UNKNOWN MSG type " + type + " in RoutingUpdateServerThread");
-						}
+						System.out.println("UNKNOWN MSG type " + type + " in RecoUpdateServerThread");
 					}
 					
 					if ( i >= numNeighbors ) {

@@ -33,4 +33,4 @@ clean:$(LOCAL_CLASS_DIR)
 	@@rm -f $(LOCAL_CLASS_DIR)/*class
 
 test:
-	CLASSPATH=$(CLASS_DIR) $(JAVA) edu.cmu.nuron.RonTest 4 localhost 8100 0
+	CLASSPATH=$(CLASS_DIR) $(JAVA) edu.cmu.nuron.RonTest 4 localhost 8100 false

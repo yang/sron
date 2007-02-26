@@ -1,6 +1,5 @@
 package edu.cmu.nuron.msg;
 
-import java.io.IOException;
 import java.io.Serializable;
 
 public class InitMsg implements Serializable {
