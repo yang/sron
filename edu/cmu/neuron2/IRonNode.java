@@ -1,0 +1,14 @@
+package edu.cmu.neuron2;
+
+import edu.cmu.neuron2.msg.InitMsg;
+import edu.cmu.neuron2.msg.RoutingMsg;
+
+public interface IRonNode {
+
+	/*
+	 * IRonNode implementations should create an initial msg containing a membership list.
+	 * This method is supposed to call im.populateMemberList
+	 * currently called from ClientHandlerThread
+	 */
+	public void populateInitMemberList(InitMsg im);
+}

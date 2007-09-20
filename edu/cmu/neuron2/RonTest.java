@@ -1,4 +1,4 @@
-package edu.cmu.nuron;
+package edu.cmu.neuron2;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -81,15 +81,15 @@ public class RonTest {
                 }
 
                 for (int i = 0; i < rn.iNumNodes; i++) {
-                    NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
+                    NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort);
                     node.start();
                 }
             }
             else {
-                for (int i = 0; i < rn.iNumNodes; i++) {
-                    RonNode node = new RonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
-                    node.start();
-                }
+//                for (int i = 0; i < rn.iNumNodes; i++) {
+//                    RonNode node = new RonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
+//                    node.start();
+//                }
             }
         }
     }
