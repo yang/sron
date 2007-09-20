@@ -49,17 +49,18 @@ public class ClientHandlerThread extends Thread {
 				im = new InitMsg(nid, numNodes);
 			}
 			
+			// TODO :: update the membership list (LOCK)
+			
 			parent.populateInitMemberList(im);
-			// send intial probe table to the other end-point
 			writer.writeObject(im);
 
-			parent.doneJoiningOverlay();
-			
-		    //System.out.println("Done!");
+			//System.out.println("Done!");
 			reader.close();
 			writer.close();
 			incoming.close();
 
+			// TODO :: have to send out new membership list to everyone else too! call a paper function for this (LOCK)
+			
 		} catch (IOException ioe) {
 			ioe.printStackTrace();
 		} catch (Exception e) {

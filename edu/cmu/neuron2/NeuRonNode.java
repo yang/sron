@@ -46,14 +46,12 @@ public class NeuRonNode extends Thread implements IRonNode {
 				ss.setReuseAddress(true);
 
 				// wait for nodes to join!
-				while(true) {
+				while(done) {
 					Socket incoming = ss.accept();
 					numConnected++;
 					// co-ordinator assigns node id to the connecting end-point
 					ClientHandlerThread worker = new ClientHandlerThread(incoming, this, numConnected);
 					worker.start();
-					
-					// TODO :: have to send out new membership list to everyone else.
 				}
 				ss.close();
 
@@ -102,10 +100,10 @@ public class NeuRonNode extends Thread implements IRonNode {
 				}
 
 				System.out.println("INCOMING MSG FROM CO-ORD!!! - " + im.toString());
-				//iNodeId = im.getId();
+				iNodeId = im.getId();
 				
 				// start a thread, that listens on port 2*(iCoordinatorPort + iNodeId), to look-out for routing updates
-				MembershipUpdateServerThread must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId), iNodeId, this);
+				MembershipUpdateServerThread must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
 				must.start();
 				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 

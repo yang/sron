@@ -75,11 +75,6 @@ public class RonTest {
 			
 			
             if (rn.bUseQuorum) {
-                if (!rn.isPerfectSquare(rn.iNumNodes)) {
-                    System.out.println("Note :: Number of nodes should be a perfect square.");
-                    System.exit(0);
-                }
-
                 for (int i = 0; i < rn.iNumNodes; i++) {
                     NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort);
                     node.start();

@@ -8,7 +8,7 @@ import java.net.SocketTimeoutException;
 import java.util.concurrent.Semaphore;
 
 import edu.cmu.neuron2.msg.BaseMsg;
-import edu.cmu.neuron2.msg.RoutingMsg;
+import edu.cmu.neuron2.msg.MembershipMsg;
 
 public class MembershipUpdateServerThread extends Thread {
 	
@@ -33,12 +33,10 @@ public class MembershipUpdateServerThread extends Thread {
 			
 			DatagramSocket ds = new DatagramSocket(iPort);
 
-			Semaphore completionSemaphore = new Semaphore(0);
-			
 			int i = 0;
 
-			RoutingMsg rm = new RoutingMsg(iNodeId, numNodes);
-			byte []b = RoutingMsg.getBytes(rm);
+			MembershipMsg mm = new MembershipMsg(iNodeId, numNodes);
+			byte []b = MembershipMsg.getBytes(mm);
 			sizeOfRoutingUpdate = b.length;
 			DatagramPacket dp = new DatagramPacket(b, b.length);
 			int j = 0;
@@ -60,10 +58,9 @@ public class MembershipUpdateServerThread extends Thread {
 						dis.close();
 						bis.close();
 
-						if (type == BaseMsg.ROUTING_MSG_TYPE) {
-							RoutingMsg rm1  = RoutingMsg.getObject(msg);
-							RoutingUpdateHandlerThread ruht = new RoutingUpdateHandlerThread(rm1, iNodeId, parentHandle, completionSemaphore);
-							ruht.start();
+						if (type == BaseMsg.MEMBERSHIP_MSG_TYPE) {
+							MembershipMsg mm1  = MembershipMsg.getObject(msg);
+							// TODO :: do something with the mesg
 						}
 						else {
 							System.out.println("UNKNOWN MSG type " + type + " in RoutingUpdateServerThread");
@@ -77,15 +74,6 @@ public class MembershipUpdateServerThread extends Thread {
 			}
 			ds.close();
 			
-
-			//System.out.println(iNodeId + " -----> " + i);
-			// you should quit only when all your threads are done.
-			try {
-				completionSemaphore.acquire(i);
-			} catch(InterruptedException ie) {
-				
-			}
-
 		} catch(Exception e) {
 			e.printStackTrace();
 		}

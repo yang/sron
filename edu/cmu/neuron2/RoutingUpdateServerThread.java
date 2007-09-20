@@ -14,28 +14,25 @@ public class RoutingUpdateServerThread extends Thread {
 	
 	int iPort;
 	int iNodeId;
-	boolean bQuit;
-	
-	int sizeOfRoutingUpdate;
 	
 	IRonNode parentHandle;
+
+	boolean bQuit;
+	int sizeOfRoutingUpdate;
 	
 	RoutingUpdateServerThread(int port, int node_id, IRonNode rn) {
 		iPort = port;
 		iNodeId = node_id;
+		parentHandle = rn;
+
 		bQuit = false;
 		sizeOfRoutingUpdate = 0;
-		parentHandle = rn;
 	}
 
 	public void run() {
 		try {
 			
 			DatagramSocket ds = new DatagramSocket(iPort);
-
-			Semaphore completionSemaphore = new Semaphore(0);
-			
-			int i = 0;
 
 			RoutingMsg rm = new RoutingMsg(iNodeId, numNodes);
 			byte []b = RoutingMsg.getBytes(rm);
@@ -48,7 +45,6 @@ public class RoutingUpdateServerThread extends Thread {
 				ds.setSoTimeout(1000);
 				try {
 					ds.receive(dp);
-					i++;
 					//System.out.println(iNodeId + " RUST - incoming adjecency table!");
 					//System.out.println(iNodeId + " RUST - incoming table!");
 	
@@ -62,8 +58,7 @@ public class RoutingUpdateServerThread extends Thread {
 
 						if (type == BaseMsg.ROUTING_MSG_TYPE) {
 							RoutingMsg rm1  = RoutingMsg.getObject(msg);
-							RoutingUpdateHandlerThread ruht = new RoutingUpdateHandlerThread(rm1, iNodeId, parentHandle, completionSemaphore);
-							ruht.start();
+							// TODO :: do something with the mesg
 						}
 						else {
 							System.out.println("UNKNOWN MSG type " + type + " in RoutingUpdateServerThread");
@@ -77,18 +72,8 @@ public class RoutingUpdateServerThread extends Thread {
 			}
 			ds.close();
 			
-
-			//System.out.println(iNodeId + " -----> " + i);
-			// you should quit only when all your threads are done.
-			try {
-				completionSemaphore.acquire(i);
-			} catch(InterruptedException ie) {
-				
-			}
-
 		} catch(Exception e) {
 			e.printStackTrace();
 		}
 	}
-	
 }
