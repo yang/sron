@@ -9,6 +9,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.Semaphore;
 
 import edu.cmu.neuron2.msg.HitsGraphBestHopMsg;
@@ -21,8 +22,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 	String sCoordinatorIp;
 	int iCoordinatorPort;
 
-	ArrayList<Integer> members;
-	ArrayList<Integer> neighbors;
+	List<Integer> members;
+	List<Integer> neighbors;
 	
 	public NeuRonNode(int id, String cName, int cPort) {
 		iNodeId = id;
@@ -46,7 +47,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 				ss.setReuseAddress(true);
 
 				// wait for nodes to join!
-				while(done) {
+				while(!done) {
 					Socket incoming = ss.accept();
 					numConnected++;
 					// co-ordinator assigns node id to the connecting end-point
@@ -102,7 +103,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 				System.out.println("INCOMING MSG FROM CO-ORD!!! - " + im.toString());
 				iNodeId = im.getId();
 				
-				// start a thread, that listens on port 2*(iCoordinatorPort + iNodeId), to look-out for routing updates
+				// start a thread, that listens on port 1000+(iCoordinatorPort + iNodeId), to look-out for routing updates
 				MembershipUpdateServerThread must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
 				must.start();
 				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
