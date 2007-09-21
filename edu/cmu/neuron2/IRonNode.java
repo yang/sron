@@ -10,5 +10,7 @@ public interface IRonNode {
 	 * This method is supposed to call im.populateMemberList
 	 * currently called from ClientHandlerThread
 	 */
-	public void populateInitMemberList(InitMsg im);
+	public void populateMemberList(InitMsg im);
+	
+	public void quit();
 }

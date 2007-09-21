@@ -18,7 +18,8 @@ public class RoutingUpdateServerThread extends Thread {
 	IRonNode parentHandle;
 
 	boolean bQuit;
-	int sizeOfRoutingUpdate;
+	
+	Semaphore semDone;
 	
 	RoutingUpdateServerThread(int port, int node_id, IRonNode rn) {
 		iPort = port;
@@ -26,7 +27,8 @@ public class RoutingUpdateServerThread extends Thread {
 		parentHandle = rn;
 
 		bQuit = false;
-		sizeOfRoutingUpdate = 0;
+
+		semDone = new Semaphore(0);
 	}
 
 	public void run() {
@@ -34,11 +36,8 @@ public class RoutingUpdateServerThread extends Thread {
 			
 			DatagramSocket ds = new DatagramSocket(iPort);
 
-			RoutingMsg rm = new RoutingMsg(iNodeId, numNodes);
-			byte []b = RoutingMsg.getBytes(rm);
-			sizeOfRoutingUpdate = b.length;
+			byte []b = new byte[65536];
 			DatagramPacket dp = new DatagramPacket(b, b.length);
-			int j = 0;
 
 			while (!bQuit) {
 				//System.out.println(iNodeId + " RUST listening on port " + iPort);
@@ -65,15 +64,24 @@ public class RoutingUpdateServerThread extends Thread {
 						}
 					
 				} catch (SocketTimeoutException ste) {
-					
-				} finally {
-					j++;
 				}
 			}
 			ds.close();
 			
 		} catch(Exception e) {
 			e.printStackTrace();
+		}
+		System.out.println(iNodeId + " RoutingUpdateServerThread quitting.");
+		semDone.release();
+	}
+	
+	public void quit() {
+		bQuit = true;
+		
+		try {
+			semDone.acquire();
+		} catch (InterruptedException ie) {
+			
 		}
 	}
 }

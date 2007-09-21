@@ -1,30 +1,34 @@
 package edu.cmu.neuron2.msg;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 
 public class InitMsg implements Serializable {
 	int id;
 	int[] memberList;
 	int numNodes;
 	
-	public InitMsg(int identifier, int num_nodes) {
+	public InitMsg(int identifier) {
 		id = identifier;
-		memberList = new int[num_nodes];
-		numNodes = num_nodes;
+		memberList = null;
+		numNodes = 0;
 	}
 
-	public void populateMemberList(Integer[] ml) {
-		//String s = new String("");
-		for (int i = 0; i < numNodes; i++) {
-			memberList[i] = ml[i];
-			//s += ", " + memberList[i];
+	public void initMemberList(ArrayList<Integer> ml) {
+		if (ml != null) {
+			numNodes = ml.size();
+			memberList = new int[numNodes];
+			for (int i = 0; i < numNodes; i++) {
+				memberList[i] = ml.get(i);
+			}
 		}
-		//System.out.println(s);
 	}
 	
-	public void getMemberList(int[] ml) {
-		for (int i = 0; i < numNodes; i++) {
-			ml[i] = memberList[i];
+	public void getMemberList(ArrayList<Integer> ml) {
+		if (ml != null) {
+			for (int i = 0; i < numNodes; i++) {
+				ml.add(new Integer(memberList[i]));
+			}
 		}
 	}
 	

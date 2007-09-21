@@ -12,16 +12,16 @@ public class ClientHandlerThread extends Thread {
 
 	Socket incoming;
 	IRonNode parent;
-	int numNodes;
+	int nodeId;
 	int otherEndPointNodeId;
 	InitMsg im;
 
 	String otherEndPointIp;
 
-	public ClientHandlerThread(Socket connection, IRonNode my_parent, int num_nodes) {
+	public ClientHandlerThread(Socket connection, IRonNode my_parent, int node_id) {
 		incoming = connection;
 		parent = my_parent;
-		numNodes = num_nodes;
+		nodeId = node_id;
 		otherEndPointIp ="";
 	}
 	
@@ -46,12 +46,12 @@ public class ClientHandlerThread extends Thread {
 				temp = msg.split(" ");
 				otherEndPointIp = temp[1];
 				int nid = Integer.parseInt(temp[2]);
-				im = new InitMsg(nid, numNodes);
+				im = new InitMsg(nid);
 			}
 			
 			// TODO :: update the membership list (LOCK)
 			
-			parent.populateInitMemberList(im);
+			parent.populateMemberList(im);
 			writer.writeObject(im);
 
 			//System.out.println("Done!");
@@ -59,7 +59,7 @@ public class ClientHandlerThread extends Thread {
 			writer.close();
 			incoming.close();
 
-			// TODO :: have to send out new membership list to everyone else too! call a paper function for this (LOCK)
+			// TODO :: have to send out new membership list to everyone else too! call a parent function for this (LOCK)
 			
 		} catch (IOException ioe) {
 			ioe.printStackTrace();

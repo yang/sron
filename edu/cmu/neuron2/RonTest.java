@@ -3,6 +3,7 @@ package edu.cmu.neuron2;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
+import java.util.ArrayList;
 import java.util.Enumeration;
 
 public class RonTest {
@@ -13,6 +14,8 @@ public class RonTest {
     protected String sCoOrdinatorServerName;
     protected int iCoOrdinatorServerPort;
     protected boolean bUseQuorum;
+    
+    protected ArrayList<IRonNode> nl;
 
     static {
         //expInterfaceIp = getExperimentalAddress();
@@ -20,7 +23,7 @@ public class RonTest {
         // hack for machines with only 1 interface
         sExpInterfaceIp = "localhost";
     }
-	
+    
     private static String getExperimentalAddress() {
         String retVal = null;
         String expIpPrefix = "172.23.65.";
@@ -49,6 +52,14 @@ public class RonTest {
     }
 	
     RonTest() {
+    	nl = new ArrayList<IRonNode>();
+    	Runtime.getRuntime().addShutdownHook(new Thread() {
+    	    public void run() { 
+    	    	for (IRonNode node: nl) {
+    	    		node.quit();
+    	    	}
+    	    }
+    	});
     }
 
     public static void main(String[] args) throws Exception {
@@ -75,9 +86,17 @@ public class RonTest {
 			
 			
             if (rn.bUseQuorum) {
-                for (int i = 0; i < rn.iNumNodes; i++) {
+                for (int i = 0; i <= rn.iNumNodes; i++) {
                     NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort);
                     node.start();
+                    rn.nl.add(node);
+                    /*
+    				try {
+    					Thread.sleep(2000);
+    				} catch (InterruptedException ie) {
+    		
+    				}
+    				*/
                 }
             }
             else {

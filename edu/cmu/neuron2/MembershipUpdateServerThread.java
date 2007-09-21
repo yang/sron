@@ -14,18 +14,21 @@ public class MembershipUpdateServerThread extends Thread {
 	
 	int iPort;
 	int iNodeId;
-	boolean bQuit;
-	
-	int sizeOfRoutingUpdate;
 	
 	IRonNode parentHandle;
 	
+	boolean bQuit;
+
+	Semaphore semDone;
+
 	MembershipUpdateServerThread(int port, int node_id, IRonNode rn) {
 		iPort = port;
 		iNodeId = node_id;
-		bQuit = false;
-		sizeOfRoutingUpdate = 0;
 		parentHandle = rn;
+
+		bQuit = false;
+		
+		semDone = new Semaphore(0);
 	}
 
 	public void run() {
@@ -35,11 +38,8 @@ public class MembershipUpdateServerThread extends Thread {
 
 			int i = 0;
 
-			MembershipMsg mm = new MembershipMsg(iNodeId, numNodes);
-			byte []b = MembershipMsg.getBytes(mm);
-			sizeOfRoutingUpdate = b.length;
+			byte []b = new byte[65536];
 			DatagramPacket dp = new DatagramPacket(b, b.length);
-			int j = 0;
 
 			while (!bQuit) {
 				//System.out.println(iNodeId + " RUST listening on port " + iPort);
@@ -67,9 +67,6 @@ public class MembershipUpdateServerThread extends Thread {
 						}
 					
 				} catch (SocketTimeoutException ste) {
-					
-				} finally {
-					j++;
 				}
 			}
 			ds.close();
@@ -77,6 +74,17 @@ public class MembershipUpdateServerThread extends Thread {
 		} catch(Exception e) {
 			e.printStackTrace();
 		}
-	}
-	
+	    System.out.println(iNodeId + " MembershipUpdateServerThread quitting.");
+		semDone.release();
+    }
+
+    public void quit() {
+	    bQuit = true;
+
+	    try {
+			semDone.acquire();
+		} catch (InterruptedException ie) {
+			
+		}
+    }
 }

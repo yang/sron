@@ -9,7 +9,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
 import java.util.concurrent.Semaphore;
 
 import edu.cmu.neuron2.msg.HitsGraphBestHopMsg;
@@ -22,13 +21,25 @@ public class NeuRonNode extends Thread implements IRonNode {
 	String sCoordinatorIp;
 	int iCoordinatorPort;
 
-	List<Integer> members;
-	List<Integer> neighbors;
+	boolean done;
+	
+	MembershipUpdateServerThread must; 	
+	RoutingUpdateServerThread rust;
+
+	ArrayList<Integer> members;
+	//ArrayList<Integer> neighbors;
 	
 	public NeuRonNode(int id, String cName, int cPort) {
 		iNodeId = id;
 		sCoordinatorIp = cName;
 		iCoordinatorPort = cPort;
+		
+		done = false;
+		
+		must = null;
+		rust = null;
+		
+		members = new ArrayList<Integer>();
 		
 		if (iNodeId == 0) {
 			bCoordinator = true;
@@ -38,23 +49,24 @@ public class NeuRonNode extends Thread implements IRonNode {
 	}
 	
 	public void run() {
-		boolean done = false;
-
 		if (bCoordinator) {
 			int numConnected = 0;
 			try {
 				ServerSocket ss = new ServerSocket(iCoordinatorPort);
 				ss.setReuseAddress(true);
 
+				System.out.println("Beep!");
 				// wait for nodes to join!
 				while(!done) {
 					Socket incoming = ss.accept();
 					numConnected++;
+					members.add(new Integer(numConnected));
 					// co-ordinator assigns node id to the connecting end-point
 					ClientHandlerThread worker = new ClientHandlerThread(incoming, this, numConnected);
 					worker.start();
 				}
 				ss.close();
+				System.out.println("Bebop!");
 
 			} catch(Exception e) {
 				System.out.println("Error: Could not bind to port, or a connection was interrupted.");
@@ -85,7 +97,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 				DataOutputStream writer = new DataOutputStream(s.getOutputStream());
 
 				// Send Join request to the Co-ordinator
-				// System.out.println("Sending join!");
+				System.out.println("Sending join!");
 				InetAddress ia = InetAddress.getLocalHost();
 				writer.writeBytes("join " + ia.getHostAddress() + " " + iNodeId + "\n");
 				//System.out.println("Sent join!");
@@ -102,14 +114,15 @@ public class NeuRonNode extends Thread implements IRonNode {
 
 				System.out.println("INCOMING MSG FROM CO-ORD!!! - " + im.toString());
 				iNodeId = im.getId();
+				readInMemberList(im);
 				
-				// start a thread, that listens on port 1000+(iCoordinatorPort + iNodeId), to look-out for routing updates
-				MembershipUpdateServerThread must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
+				// start a thread, that listens on port 2*(iCoordinatorPort + iNodeId), to look-out for routing updates
+				must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
 				must.start();
 				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 
 				// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
-				RoutingUpdateServerThread rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, this);
+				rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, this);
 				rust.start();
 				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 
@@ -124,10 +137,18 @@ public class NeuRonNode extends Thread implements IRonNode {
 		}
 	}
 	
-	public void populateInitMemberList(InitMsg im) {
+	public void populateMemberList(InitMsg im) {
 		if (im != null) {
 			synchronized(members) {
-				im.populateMemberList((Integer[])members.toArray());
+				im.initMemberList(members);
+			}
+		}
+	}
+	
+	public void readInMemberList(InitMsg im) {
+		if (im != null) {
+			synchronized(members) {
+				im.getMemberList(members);
 			}
 		}
 	}
@@ -136,4 +157,15 @@ public class NeuRonNode extends Thread implements IRonNode {
 		return iCoordinatorPort;
 	}
 	
+	public void quit() {
+		done = true;
+		
+		if (must != null) {
+			must.quit();
+		}
+		
+		if (rust != null) {
+			rust.quit();
+		}
+	}
 }

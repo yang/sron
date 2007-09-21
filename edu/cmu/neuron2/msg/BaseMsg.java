@@ -6,9 +6,9 @@ import java.io.DataInputStream;
 public abstract class BaseMsg {
 	int msgType;
 	
+	public static final int MEMBERSHIP_MSG_TYPE = 0;
 	public static final int ROUTING_MSG_TYPE = 1;
 	public static final int BESTHOP_RECOMMENDATION_MSG_TYPE = 2;
-	public static final int MEMBERSHIP_MSG_TYPE = 3;
 	
 
 	public static BaseMsg getObject(byte[] b) throws Exception {
