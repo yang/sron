@@ -200,14 +200,14 @@ public class NeuRonNode extends Thread implements IRonNode {
 					if (memberId != exceptionNodeId) {
 						// XXX: we are using the co-ords ip (but that's ok, because this is run on a single machine)
 						try {
-							System.out.println("sendning to port: " + ((iCoordinatorPort + 1000) + memberId));
-							Socket s = new Socket(sCoordinatorIp, (iCoordinatorPort + 1000) + memberId);
-							BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream()));
-							ObjectOutputStream writer = new ObjectOutputStream(s.getOutputStream());
+							System.out.println("sending to port: " + ((iCoordinatorPort + 1000) + memberId));
+
+					        DatagramSocket s = new DatagramSocket();
 							MembershipMsg mm = new MembershipMsg(iNodeId, members);
-							writer.writeObject(mm);
-							reader.close();
-							writer.close();
+					        byte[] buf = MembershipMsg.getBytes(mm);
+					        InetAddress sAddr = InetAddress.getByName(sCoordinatorIp);
+					        DatagramPacket packet = new DatagramPacket(buf, buf.length, sAddr, ((iCoordinatorPort + 1000) + memberId));
+					        s.send(packet);
 							s.close();
 						} catch(Exception e){
 							e.printStackTrace();

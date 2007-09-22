@@ -34,10 +34,11 @@ public class InitMsg implements Serializable {
 	
 	public String toString() {
 		String s = new String("");
-		s += "Id: " + id + "\n";
+		s += "Node Id: " + id + ". Msg = {";
 		for (int i = 0; i < numNodes; i++) {
-			s += ", " + memberList[i];
+			s += memberList[i] + ", ";
 		}
+		s += "}";
 		return s;
 	}
 	

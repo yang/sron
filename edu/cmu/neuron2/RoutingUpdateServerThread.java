@@ -41,7 +41,7 @@ public class RoutingUpdateServerThread extends Thread {
 
 			while (!bQuit) {
 				//System.out.println(iNodeId + " RUST listening on port " + iPort);
-				ds.setSoTimeout(5000);
+				ds.setSoTimeout(1000);
 				try {
 					ds.receive(dp);
 					//System.out.println(iNodeId + " RUST - incoming adjecency table!");

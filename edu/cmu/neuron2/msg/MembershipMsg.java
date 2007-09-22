@@ -61,14 +61,14 @@ public class MembershipMsg extends BaseMsg {
 		return s;
 	}
 
-	public static byte[] getBytes(MembershipMsg rm) throws java.io.IOException{
+	public static byte[] getBytes(MembershipMsg mm) throws java.io.IOException{
 	    ByteArrayOutputStream bos = new ByteArrayOutputStream();
 	    DataOutputStream dos = new DataOutputStream(bos);
-	    dos.writeInt(rm.msgType);
-	    dos.writeInt(rm.id);
-	    dos.writeInt(rm.numNodes);
-	    for(int i = 0; i < rm.numNodes; i++) {
-	    	dos.writeInt(rm.membershipList[i]);
+	    dos.writeInt(mm.msgType);
+	    dos.writeInt(mm.id);
+	    dos.writeInt(mm.numNodes);
+	    for(int i = 0; i < mm.numNodes; i++) {
+	    	dos.writeInt(mm.membershipList[i]);
 	    }
 	    dos.flush();
 	    dos.close();
@@ -87,9 +87,9 @@ public class MembershipMsg extends BaseMsg {
 	    for(int i = 0; i < numNodes; i++) {
 	    	ml.add(dis.readInt());
 	    }
-	    MembershipMsg rm = new MembershipMsg(id, ml);
+	    MembershipMsg mm = new MembershipMsg(id, ml);
 	    dis.close();
 	    bis.close();
-	    return rm;
+	    return mm;
 	}
 }

@@ -43,7 +43,7 @@ public class MembershipUpdateServerThread extends Thread {
 
 			System.out.println(iNodeId + " MembershipThread listening on port " + iPort);
 			while (!bQuit) {
-				ds.setSoTimeout(5000);
+				ds.setSoTimeout(1000);
 				try {
 					ds.receive(dp);
 					i++;

@@ -90,11 +90,12 @@ public class RonTest {
                     NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort);
                     node.start();
                     rn.nl.add(node);
+                    /*
     				try {
     					Thread.sleep(2000);
     				} catch (InterruptedException ie) {
-    		
     				}
+    				*/
                 }
             }
             else {
