@@ -1,7 +1,10 @@
 package edu.cmu.neuron2;
 
+import java.io.BufferedReader;
 import java.io.DataOutputStream;
+import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -13,6 +16,7 @@ import java.util.concurrent.Semaphore;
 
 import edu.cmu.neuron2.msg.HitsGraphBestHopMsg;
 import edu.cmu.neuron2.msg.InitMsg;
+import edu.cmu.neuron2.msg.MembershipMsg;
 import edu.cmu.neuron2.msg.RoutingMsg;
 
 public class NeuRonNode extends Thread implements IRonNode {
@@ -26,6 +30,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 	MembershipUpdateServerThread must; 	
 	RoutingUpdateServerThread rust;
 
+	Semaphore semStateLock;
+	
 	ArrayList<Integer> members;
 	//ArrayList<Integer> neighbors;
 	
@@ -40,6 +46,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 		rust = null;
 		
 		members = new ArrayList<Integer>();
+		
+		semStateLock = new Semaphore(1);
 		
 		if (iNodeId == 0) {
 			bCoordinator = true;
@@ -60,7 +68,6 @@ public class NeuRonNode extends Thread implements IRonNode {
 				while(!done) {
 					Socket incoming = ss.accept();
 					numConnected++;
-					members.add(new Integer(numConnected));
 					// co-ordinator assigns node id to the connecting end-point
 					ClientHandlerThread worker = new ClientHandlerThread(incoming, this, numConnected);
 					worker.start();
@@ -116,15 +123,13 @@ public class NeuRonNode extends Thread implements IRonNode {
 				iNodeId = im.getId();
 				readInMemberList(im);
 				
-				// start a thread, that listens on port 2*(iCoordinatorPort + iNodeId), to look-out for routing updates
+				// start a thread, that listens on port ((iCoordinatorPort + 1000) + iNodeId), to look-out for routing updates
 				must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
 				must.start();
-				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 
 				// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
 				rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, this);
 				rust.start();
-				//System.out.println(iNodeId + " started RUST at port " + (iCoordinatorPort + iNodeId));
 
 				reader.close();
 				writer.close();
@@ -136,6 +141,83 @@ public class NeuRonNode extends Thread implements IRonNode {
 			}
 		}
 	}
+	
+	
+	public void aquireStateLock() {
+		semStateLock.acquireUninterruptibly();
+	}
+
+	public void releaseStateLock() {
+		semStateLock.release();
+	}
+
+	public void addNode(int node_id) {
+		if (members != null) {
+			synchronized(members) {
+				boolean bFlag = false;
+				for (Integer nid: members) {
+					if (nid == node_id) {
+						bFlag = true;
+						break;
+					}
+				}
+				if (bFlag == false) {
+					members.add(new Integer(node_id));
+					broadcastMembershipChange(node_id);
+				}
+			}
+		}
+	}
+	
+	public void broadcastMembershipChange() {
+		if (members != null) {
+			synchronized(members) {
+				
+				for (Integer memberId: members) {
+					// XXX: we are using the co-ords ip (but that's ok, because this is run on a single machine)
+					try {
+						Socket s = new Socket(sCoordinatorIp, (iCoordinatorPort + 1000) + memberId);
+						BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream()));
+						ObjectOutputStream writer = new ObjectOutputStream(s.getOutputStream());
+						MembershipMsg mm = new MembershipMsg(iNodeId, members);
+						writer.writeObject(mm);
+						reader.close();
+						writer.close();
+						s.close();
+					} catch(Exception e){
+						e.printStackTrace();
+					}
+				}
+			}
+		}		
+	}
+
+	public void broadcastMembershipChange(int exceptionNodeId) {
+		if (members != null) {
+			synchronized(members) {
+				
+				for (Integer memberId: members) {
+					if (memberId != exceptionNodeId) {
+						// XXX: we are using the co-ords ip (but that's ok, because this is run on a single machine)
+						try {
+							System.out.println("sendning to port: " + ((iCoordinatorPort + 1000) + memberId));
+							Socket s = new Socket(sCoordinatorIp, (iCoordinatorPort + 1000) + memberId);
+							BufferedReader reader = new BufferedReader(new InputStreamReader(s.getInputStream()));
+							ObjectOutputStream writer = new ObjectOutputStream(s.getOutputStream());
+							MembershipMsg mm = new MembershipMsg(iNodeId, members);
+							writer.writeObject(mm);
+							reader.close();
+							writer.close();
+							s.close();
+						} catch(Exception e){
+							e.printStackTrace();
+						}
+					}
+				}
+			}
+		}		
+	}
+
 	
 	public void populateMemberList(InitMsg im) {
 		if (im != null) {
@@ -152,11 +234,36 @@ public class NeuRonNode extends Thread implements IRonNode {
 			}
 		}
 	}
+	
+	public void handleMembershipChange(MembershipMsg mm) {
+		if (mm != null) {
+			// TODO :: might need something more complicated
+			synchronized(members) {
+				for (Iterator it = members.iterator (); it.hasNext (); ) {
+					it.next();
+					it.remove(); // NOTE - this is it.remove and not members.remove (which would result in a ConcurrentModificationException!)
+				}
+				mm.getMemberList(members);
+				printMembership();
+			}
+		}
+	}
 
 	public int getCoordinatorPort() {
 		return iCoordinatorPort;
 	}
 	
+	public void printMembership() {
+		String s = new String("Membership for Node " + iNodeId + ". Membership = [");
+		synchronized (members) {
+			for (Integer memberId: members) {
+				s += memberId + ", ";
+			}
+			s += "]";
+		}
+		System.out.println(s);
+	}
+
 	public void quit() {
 		done = true;
 		

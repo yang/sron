@@ -41,9 +41,9 @@ public class MembershipUpdateServerThread extends Thread {
 			byte []b = new byte[65536];
 			DatagramPacket dp = new DatagramPacket(b, b.length);
 
+			System.out.println(iNodeId + " MembershipThread listening on port " + iPort);
 			while (!bQuit) {
-				//System.out.println(iNodeId + " RUST listening on port " + iPort);
-				ds.setSoTimeout(1000);
+				ds.setSoTimeout(5000);
 				try {
 					ds.receive(dp);
 					i++;
@@ -60,7 +60,10 @@ public class MembershipUpdateServerThread extends Thread {
 
 						if (type == BaseMsg.MEMBERSHIP_MSG_TYPE) {
 							MembershipMsg mm1  = MembershipMsg.getObject(msg);
+							System.out.println("Got membership update: " + mm1.toString());
+
 							// TODO :: do something with the mesg
+							parentHandle.handleMembershipChange(mm1);
 						}
 						else {
 							System.out.println("UNKNOWN MSG type " + type + " in RoutingUpdateServerThread");
@@ -80,11 +83,6 @@ public class MembershipUpdateServerThread extends Thread {
 
     public void quit() {
 	    bQuit = true;
-
-	    try {
-			semDone.acquire();
-		} catch (InterruptedException ie) {
-			
-		}
+		semDone.acquireUninterruptibly();
     }
 }

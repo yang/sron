@@ -45,12 +45,12 @@ public class ClientHandlerThread extends Thread {
 				String [] temp = null;
 				temp = msg.split(" ");
 				otherEndPointIp = temp[1];
-				int nid = Integer.parseInt(temp[2]);
-				im = new InitMsg(nid);
+				//int nid = Integer.parseInt(temp[2]);
+				im = new InitMsg(nodeId);
 			}
 			
-			// TODO :: update the membership list (LOCK)
-			
+			parent.aquireStateLock();		// lock state (expensive locking operation)
+			parent.addNode(nodeId);			// also sends out updates to other nodes!
 			parent.populateMemberList(im);
 			writer.writeObject(im);
 
@@ -58,8 +58,7 @@ public class ClientHandlerThread extends Thread {
 			reader.close();
 			writer.close();
 			incoming.close();
-
-			// TODO :: have to send out new membership list to everyone else too! call a parent function for this (LOCK)
+			parent.releaseStateLock(); 		// unlock state
 			
 		} catch (IOException ioe) {
 			ioe.printStackTrace();

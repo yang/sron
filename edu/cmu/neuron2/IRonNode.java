@@ -1,6 +1,7 @@
 package edu.cmu.neuron2;
 
 import edu.cmu.neuron2.msg.InitMsg;
+import edu.cmu.neuron2.msg.MembershipMsg;
 import edu.cmu.neuron2.msg.RoutingMsg;
 
 public interface IRonNode {
@@ -11,6 +12,12 @@ public interface IRonNode {
 	 * currently called from ClientHandlerThread
 	 */
 	public void populateMemberList(InitMsg im);
+
+	public void aquireStateLock();
+	public void releaseStateLock();
+	public void addNode(int node_id);
+
+	public void handleMembershipChange(MembershipMsg mm);
 	
 	public void quit();
 }

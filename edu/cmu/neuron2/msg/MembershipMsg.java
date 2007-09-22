@@ -4,36 +4,47 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.util.ArrayList;
 
 /*
  * Represents Adjecency/Probe Table for a node identified by the field "id".
  */
 public class MembershipMsg extends BaseMsg {
-	int id; // routing msg from node with this id
+	int id; // membership msg from node with this id
 	int[] membershipList;
 	int numNodes;
 
 	static 	ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
-	public MembershipMsg(int identifier, int num_nodes) {
+	public MembershipMsg(int identifier, ArrayList<Integer> ml) {
 		msgType = BaseMsg.MEMBERSHIP_MSG_TYPE;
 		id = identifier;
-		membershipList = new int[num_nodes];
-		numNodes = num_nodes;
+		
+		numNodes = ml.size();
+		
+		membershipList = new int[numNodes];
 		for (int i = 0; i < numNodes; i++) {
-			membershipList[i] = -1;
+			membershipList[i] = ml.get(i);
 		}
 	}
 
-	public void populateMembershipList(int[] mt) {
-		for (int i = 0; i < numNodes; i++) {
-			membershipList[i] = mt[i];
-		}
-	}
+//	public void populateMembershipList(int[] mt) {
+//		for (int i = 0; i < numNodes; i++) {
+//			membershipList[i] = mt[i];
+//		}
+//	}
+
+//	public void getMembershipList(int[] ml) {
+//		for (int i = 0; i < numNodes; i++) {
+//			ml[i] = membershipList[i];
+//		}
+//	}
 	
-	public void getMembershipList(int[] ml) {
-		for (int i = 0; i < numNodes; i++) {
-			ml[i] = membershipList[i];
+	public void getMemberList(ArrayList<Integer> ml) {
+		if (ml != null) {
+			for (int i = 0; i < numNodes; i++) {
+				ml.add(new Integer(membershipList[i]));
+			}
 		}
 	}
 	
@@ -42,7 +53,7 @@ public class MembershipMsg extends BaseMsg {
 	}
 	
 	public String toString() {
-		String s = new String("Routing Msg from Node " + id + ". Msg = [");
+		String s = new String("Membership Msg from Node " + id + ". Msg = [");
 		for (int i = 0; i < numNodes; i++) {
 			s += membershipList[i] + ", ";
 		}
@@ -72,10 +83,11 @@ public class MembershipMsg extends BaseMsg {
 	    int msgType = dis.readInt();
 	    int id = dis.readInt();
 	    int numNodes = dis.readInt();
-	    MembershipMsg rm = new MembershipMsg(id, numNodes);
-	    for(int i = 0; i < rm.numNodes; i++) {
-	    	rm.membershipList[i] = dis.readInt();
+	    ArrayList<Integer> ml = new ArrayList<Integer>();
+	    for(int i = 0; i < numNodes; i++) {
+	    	ml.add(dis.readInt());
 	    }
+	    MembershipMsg rm = new MembershipMsg(id, ml);
 	    dis.close();
 	    bis.close();
 	    return rm;

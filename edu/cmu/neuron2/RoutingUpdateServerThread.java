@@ -41,7 +41,7 @@ public class RoutingUpdateServerThread extends Thread {
 
 			while (!bQuit) {
 				//System.out.println(iNodeId + " RUST listening on port " + iPort);
-				ds.setSoTimeout(1000);
+				ds.setSoTimeout(5000);
 				try {
 					ds.receive(dp);
 					//System.out.println(iNodeId + " RUST - incoming adjecency table!");
@@ -77,11 +77,6 @@ public class RoutingUpdateServerThread extends Thread {
 	
 	public void quit() {
 		bQuit = true;
-		
-		try {
-			semDone.acquire();
-		} catch (InterruptedException ie) {
-			
-		}
+		semDone.acquireUninterruptibly();
 	}
 }
