@@ -15,7 +15,7 @@ public interface IRonNode {
 
 	public void aquireStateLock();
 	public void releaseStateLock();
-	public void addNode(int node_id);
+	public void addMemberNode(int node_id);
 
 	public void handleMembershipChange(MembershipMsg mm);
 	

@@ -50,7 +50,7 @@ public class ClientHandlerThread extends Thread {
 			}
 			
 			parent.aquireStateLock();		// lock state (expensive locking operation)
-			parent.addNode(nodeId);			// also sends out updates to other nodes!
+			parent.addMemberNode(nodeId);			// also sends out updates to other nodes!
 			parent.populateMemberList(im);
 			writer.writeObject(im);
 

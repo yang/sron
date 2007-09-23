@@ -35,7 +35,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 	ArrayList<Integer> members;
 	int[][] grid;
 	int numCols, numRows;
-	//ArrayList<Integer> neighbors;
+	ArrayList<Integer> neighbors;
 	
 	public NeuRonNode(int id, String cName, int cPort) {
 		iNodeId = id;
@@ -50,6 +50,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 		members = new ArrayList<Integer>();
 		grid = null;
 		numCols = numRows = 0;
+		neighbors = new ArrayList<Integer>();
 		
 		semStateLock = new Semaphore(1);
 		
@@ -125,10 +126,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 
 				System.out.println("INCOMING MSG FROM CO-ORD!!! - " + im.toString());
 				iNodeId = im.getId();
-				readInMemberList(im);
-				repopulateGrid();
-				printGrid();
-
+				handleMembershipChange(im);
 				
 				// start a thread, that listens on port ((iCoordinatorPort + 1000) + iNodeId), to look-out for routing updates
 				must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
@@ -160,7 +158,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 		semStateLock.release();
 	}
 
-	public void addNode(int node_id) {
+	public void addMemberNode(int node_id) {
 		if (members != null) {
 			synchronized(members) {
 				boolean bFlag = false;
@@ -246,7 +244,6 @@ public class NeuRonNode extends Thread implements IRonNode {
 	
 	public void handleMembershipChange(MembershipMsg mm) {
 		if (mm != null) {
-//			synchronized(members) {
 				aquireStateLock();
 				for (Iterator it = members.iterator (); it.hasNext (); ) {
 					it.next();
@@ -256,15 +253,27 @@ public class NeuRonNode extends Thread implements IRonNode {
 				printMembership();
 				repopulateGrid();
 				printGrid();
+				printNeighborList();
 				releaseStateLock();
-//			}
 		}
 	}
-	
+
+	public void handleMembershipChange(InitMsg im) {
+		if (im != null) {
+			aquireStateLock();
+			im.getMemberList(members);
+			//printMembership();
+			repopulateGrid();
+			printGrid();
+			printNeighborList();
+			releaseStateLock();
+		}
+	}
+
 	// NOTE :: assumes that the state is locked already
 	private void repopulateGrid() {
 		numCols = (int) Math.ceil(Math.sqrt(members.size()));
-		numRows = (int) Math.ceil(members.size() / numCols);
+		numRows = (int) Math.ceil((double)members.size() / (double)numCols);
 		
 		grid = new int[numRows][numCols];
 		
@@ -280,6 +289,52 @@ public class NeuRonNode extends Thread implements IRonNode {
 				m++;
 			}
 		}
+		
+		repopulateNeighborList();
+	}
+	
+	// NOTE :: assumes that the state is locked already
+	private void repopulateNeighborList() {
+		if (neighbors != null) {
+			for (Iterator it = neighbors.iterator (); it.hasNext (); ) {
+				it.next();
+				it.remove(); // NOTE :: this is it.remove and not members.remove (which would result in a ConcurrentModificationException!)
+			}
+		}
+		for (int i = 0; i < numRows; i++) {
+			for (int j = 0; j < numCols; j++) {
+				if (grid[i][j] == iNodeId) {
+					// all the nodes in row i, and all the nodes in column j are belong to us :)
+					//System.out.println("Node " + iNodeId + " looking for new neighbors. i = " + i + "; j = " + j);
+					for (int x = 0; x < numCols; x++) {
+						if (grid[i][x] != iNodeId) {
+							addNeighborNode(grid[i][x]);
+						}
+					}
+					for (int x = 0; x < numRows; x++) {
+						if (grid[x][j] != iNodeId) {
+							addNeighborNode(grid[x][j]);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// NOTE :: assumes that the state is locked already
+	private void addNeighborNode(int node_id) {
+		synchronized(neighbors) {
+			boolean bFlag = false;
+			for (Integer nid: neighbors) {
+				if (nid == node_id) {
+					bFlag = true;
+					break;
+				}
+			}
+			if (bFlag == false) {
+				neighbors.add(new Integer(node_id));
+			}
+		}
 	}
 
 	public int getCoordinatorPort() {
@@ -291,6 +346,17 @@ public class NeuRonNode extends Thread implements IRonNode {
 		synchronized (members) {
 			for (Integer memberId: members) {
 				s += memberId + ", ";
+			}
+			s += "]";
+		}
+		System.out.println(s);
+	}
+
+	public void printNeighborList() {
+		String s = new String("Neighbors for Node " + iNodeId + ". Neighbors = [");
+		synchronized (neighbors) {
+			for (Integer neighborId: neighbors) {
+				s += neighborId + ", ";
 			}
 			s += "]";
 		}
