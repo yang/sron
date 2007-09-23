@@ -58,6 +58,7 @@ public class RoutingUpdateServerThread extends Thread {
 						if (type == BaseMsg.ROUTING_MSG_TYPE) {
 							RoutingMsg rm1  = RoutingMsg.getObject(msg);
 							// TODO :: do something with the mesg
+							System.out.println("Node " + iNodeId + "=> " + rm1.toString());
 						}
 						else {
 							System.out.println("UNKNOWN MSG type " + type + " in RoutingUpdateServerThread");

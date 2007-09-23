@@ -12,9 +12,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.Random;
 import java.util.concurrent.Semaphore;
 
-import edu.cmu.neuron2.msg.HitsGraphBestHopMsg;
 import edu.cmu.neuron2.msg.InitMsg;
 import edu.cmu.neuron2.msg.MembershipMsg;
 import edu.cmu.neuron2.msg.RoutingMsg;
@@ -29,13 +29,20 @@ public class NeuRonNode extends Thread implements IRonNode {
 	
 	MembershipUpdateServerThread must; 	
 	RoutingUpdateServerThread rust;
+	RoutingUpdateThread rut;
+	//NextHopRecoThread nhrt;
+	//NextHopRecoServerThread nhrt_s;
 
 	Semaphore semStateLock;
 	
 	ArrayList<Integer> members;
+	ArrayList<Integer> probeTable;   // value at index i, is the link latency to node at index i in members
+	ArrayList<Integer> bestHopTable; // value at index i, is the best hop value for node at index i in members
 	int[][] grid;
 	int numCols, numRows;
 	ArrayList<Integer> neighbors;
+
+    Random generator;
 	
 	public NeuRonNode(int id, String cName, int cPort) {
 		iNodeId = id;
@@ -46,14 +53,21 @@ public class NeuRonNode extends Thread implements IRonNode {
 		
 		must = null;
 		rust = null;
+		rut = null;
+		//nhrt = null;
+		//nhrt_s = null;
 		
+		generator = new Random(iNodeId);
+		
+		semStateLock = new Semaphore(1);
+
 		members = new ArrayList<Integer>();
+		probeTable = new ArrayList<Integer>();
+		bestHopTable = new ArrayList<Integer>();
 		grid = null;
 		numCols = numRows = 0;
 		neighbors = new ArrayList<Integer>();
-		
-		semStateLock = new Semaphore(1);
-		
+				
 		if (iNodeId == 0) {
 			bCoordinator = true;
 		} else {
@@ -128,13 +142,17 @@ public class NeuRonNode extends Thread implements IRonNode {
 				iNodeId = im.getId();
 				handleMembershipChange(im);
 				
+				// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
+				rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, this);
+				rust.start();
+
 				// start a thread, that listens on port ((iCoordinatorPort + 1000) + iNodeId), to look-out for routing updates
 				must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
 				must.start();
 
-				// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
-				rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, this);
-				rust.start();
+				// start a thread, that loops and send routing updates periodically
+				rut = new RoutingUpdateThread(iNodeId, this);
+				rut.start();
 
 				writer.writeBytes("done " + iNodeId + "\n");
 
@@ -291,6 +309,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 		}
 		
 		repopulateNeighborList();
+		repopulateProbeTable();
 	}
 	
 	// NOTE :: assumes that the state is locked already
@@ -317,6 +336,23 @@ public class NeuRonNode extends Thread implements IRonNode {
 						}
 					}
 				}
+			}
+		}
+	}
+
+	// NOTE :: assumes that the state is locked already
+	private void repopulateProbeTable() {
+		if (probeTable != null) {
+			for (Iterator it = probeTable.iterator (); it.hasNext (); ) {
+				it.next();
+				it.remove(); // NOTE :: this is it.remove and not members.remove (which would result in a ConcurrentModificationException!)
+			}
+		}
+		for (Integer memberId: members) {
+			if (memberId == iNodeId) {
+				probeTable.add(0);
+			} else {
+				probeTable.add(generator.nextInt());
 			}
 		}
 	}
@@ -375,6 +411,34 @@ public class NeuRonNode extends Thread implements IRonNode {
 		}
 		System.out.println(s);
 	}
+	
+	
+	public void sendAllNeighborsAdjacencyTable() {
+		aquireStateLock();
+		RoutingMsg rm = new RoutingMsg(iNodeId, members, probeTable);
+
+		try {
+			byte[] buf = RoutingMsg.getBytes(rm);
+			
+			for (Integer neighborId: neighbors) {
+				try {
+					//System.out.println("Node " + iNodeId + ": sending to port " + (iCoordinatorPort + neighborId));
+	
+			        DatagramSocket s = new DatagramSocket();
+			        InetAddress sAddr = InetAddress.getByName(sCoordinatorIp);
+			        DatagramPacket packet = new DatagramPacket(buf, buf.length, sAddr, iCoordinatorPort + neighborId);
+			        s.send(packet);
+					s.close();
+				} catch(Exception e){
+					e.printStackTrace();
+				}
+			}
+		} catch(Exception e){
+			e.printStackTrace();
+		}
+		
+		releaseStateLock();
+	}
 
 	public void quit() {
 		done = true;
@@ -386,5 +450,18 @@ public class NeuRonNode extends Thread implements IRonNode {
 		if (rust != null) {
 			rust.quit();
 		}
+		
+		if (rut != null) {
+			rut.quit();
+		}
+
+//		if (nhrt != null) {
+//			nhrt.quit();
+//		}
+//
+//		if (nhrt_s != null) {
+//			nhrt_s.quit();
+//		}
+
 	}
 }

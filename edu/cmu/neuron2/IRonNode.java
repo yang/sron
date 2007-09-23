@@ -19,5 +19,7 @@ public interface IRonNode {
 
 	public void handleMembershipChange(MembershipMsg mm);
 	
+	public void sendAllNeighborsAdjacencyTable();
+	
 	public void quit();
 }

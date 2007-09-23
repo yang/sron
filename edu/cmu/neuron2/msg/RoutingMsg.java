@@ -4,27 +4,47 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.util.ArrayList;
 
-/*
- * Represents Adjecency/Probe Table for a node identified by the field "id".
- */
 public class RoutingMsg extends BaseMsg {
 	int id; // routing msg from node with this id
+	int[] membershipList;
 	int[] probeTable;
 	int numNodes;
 
 	static 	ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
-	public RoutingMsg(int identifier, int num_nodes) {
+	public RoutingMsg(int identifier, ArrayList<Integer> ml, ArrayList<Integer> pt) {
 		msgType = BaseMsg.ROUTING_MSG_TYPE;
 		id = identifier;
-		probeTable = new int[num_nodes];
-		numNodes = num_nodes;
+
+		numNodes = ml.size();
+		membershipList = new int[numNodes];
+		for (int i = 0; i < numNodes; i++) {
+			membershipList[i] = ml.get(i);
+		}
+
+		probeTable = new int[numNodes];
+		for (int i = 0; i < numNodes; i++) {
+			probeTable[i] = pt.get(i);
+		}
+
+		/*
 		for (int i = 0; i < numNodes; i++) {
 			probeTable[i] = -1;
 		}
+		*/
 	}
 
+	private RoutingMsg(int identifier, int num_nodes) {
+		msgType = BaseMsg.ROUTING_MSG_TYPE;
+		id = identifier;
+		numNodes = num_nodes;
+		membershipList = new int[numNodes];
+		probeTable = new int[numNodes];
+	}
+	
+	/*
 	public void populateProbeTable(int[] pt) {
 		for (int i = 0; i < numNodes; i++) {
 			probeTable[i] = pt[i];
@@ -43,6 +63,7 @@ public class RoutingMsg extends BaseMsg {
 		}
 		return -1;
 	}
+	*/
 	
 	public int getOriginatorId() {
 		return id;
@@ -51,7 +72,7 @@ public class RoutingMsg extends BaseMsg {
 	public String toString() {
 		String s = new String("Routing Msg from Node " + id + ". Msg = [");
 		for (int i = 0; i < numNodes; i++) {
-			s += probeTable[i] + ", ";
+			s += membershipList[i] + ":" + probeTable[i] + ", ";
 		}
 		s += "]";
 		return s;
@@ -63,6 +84,9 @@ public class RoutingMsg extends BaseMsg {
 	    dos.writeInt(rm.msgType);
 	    dos.writeInt(rm.id);
 	    dos.writeInt(rm.numNodes);
+	    for(int i = 0; i < rm.numNodes; i++) {
+	    	dos.writeInt(rm.membershipList[i]);
+	    }
 	    for(int i = 0; i < rm.numNodes; i++) {
 	    	dos.writeInt(rm.probeTable[i]);
 	    }
@@ -80,6 +104,9 @@ public class RoutingMsg extends BaseMsg {
 	    int id = dis.readInt();
 	    int numNodes = dis.readInt();
 	    RoutingMsg rm = new RoutingMsg(id, numNodes);
+	    for(int i = 0; i < rm.numNodes; i++) {
+	    	rm.membershipList[i] = dis.readInt();
+	    }
 	    for(int i = 0; i < rm.numNodes; i++) {
 	    	rm.probeTable[i] = dis.readInt();
 	    }
