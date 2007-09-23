@@ -126,8 +126,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 				System.out.println("INCOMING MSG FROM CO-ORD!!! - " + im.toString());
 				iNodeId = im.getId();
 				readInMemberList(im);
-				//repopulateGrid();
-				//printGrid();
+				repopulateGrid();
+				printGrid();
 
 				
 				// start a thread, that listens on port ((iCoordinatorPort + 1000) + iNodeId), to look-out for routing updates
@@ -246,7 +246,6 @@ public class NeuRonNode extends Thread implements IRonNode {
 	
 	public void handleMembershipChange(MembershipMsg mm) {
 		if (mm != null) {
-			// TODO :: might need something more complicated
 //			synchronized(members) {
 				aquireStateLock();
 				for (Iterator it = members.iterator (); it.hasNext (); ) {
@@ -255,8 +254,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 				}
 				mm.getMemberList(members);
 				printMembership();
-				//repopulateGrid();
-				//printGrid();
+				repopulateGrid();
+				printGrid();
 				releaseStateLock();
 //			}
 		}
@@ -267,7 +266,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 		numCols = (int) Math.ceil(Math.sqrt(members.size()));
 		numRows = (int) Math.ceil(members.size() / numCols);
 		
-		grid = new int[numCols][numRows];
+		grid = new int[numRows][numCols];
 		
 		//System.out.println("Cols = " + numCols + "; Rows = " + numRows + "; Members = " + members.size());
 		int m = 0;
@@ -276,7 +275,7 @@ public class NeuRonNode extends Thread implements IRonNode {
 				if (m >= members.size()) {
 					m = 0;
 				}
-				//System.out.println("i = " + i + "; j = " + j + "; m = " + m);
+				//System.out.println("i = " + i + "; j = " + j + "; m = " + m + "; member = " + members.get(m));
 				grid[i][j] = members.get(m);
 				m++;
 			}
