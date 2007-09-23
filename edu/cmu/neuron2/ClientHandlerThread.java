@@ -54,6 +54,16 @@ public class ClientHandlerThread extends Thread {
 			parent.populateMemberList(im);
 			writer.writeObject(im);
 
+			msg = new String("");
+			done = false;
+			while (!done) {
+			    String in_msg = reader.readLine();
+			    if (in_msg != null) {
+			    	done = true;
+				    msg += in_msg;
+			    }
+			}
+			
 			//System.out.println("Done!");
 			reader.close();
 			writer.close();

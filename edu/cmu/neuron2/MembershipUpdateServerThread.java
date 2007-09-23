@@ -62,7 +62,6 @@ public class MembershipUpdateServerThread extends Thread {
 							MembershipMsg mm1  = MembershipMsg.getObject(msg);
 							System.out.println("Got membership update: " + mm1.toString());
 
-							// TODO :: do something with the mesg
 							parentHandle.handleMembershipChange(mm1);
 						}
 						else {

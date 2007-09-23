@@ -33,6 +33,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 	Semaphore semStateLock;
 	
 	ArrayList<Integer> members;
+	int[][] grid;
+	int numCols, numRows;
 	//ArrayList<Integer> neighbors;
 	
 	public NeuRonNode(int id, String cName, int cPort) {
@@ -46,6 +48,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 		rust = null;
 		
 		members = new ArrayList<Integer>();
+		grid = null;
+		numCols = numRows = 0;
 		
 		semStateLock = new Semaphore(1);
 		
@@ -122,6 +126,9 @@ public class NeuRonNode extends Thread implements IRonNode {
 				System.out.println("INCOMING MSG FROM CO-ORD!!! - " + im.toString());
 				iNodeId = im.getId();
 				readInMemberList(im);
+				//repopulateGrid();
+				//printGrid();
+
 				
 				// start a thread, that listens on port ((iCoordinatorPort + 1000) + iNodeId), to look-out for routing updates
 				must = new MembershipUpdateServerThread((iCoordinatorPort + 1000) + iNodeId, iNodeId, this);
@@ -130,6 +137,8 @@ public class NeuRonNode extends Thread implements IRonNode {
 				// start a thread, that listens on port (iCoordinatorPort + iNodeId), to look-out for routing updates
 				rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId, iNodeId, this);
 				rust.start();
+
+				writer.writeBytes("done " + iNodeId + "\n");
 
 				reader.close();
 				writer.close();
@@ -238,13 +247,38 @@ public class NeuRonNode extends Thread implements IRonNode {
 	public void handleMembershipChange(MembershipMsg mm) {
 		if (mm != null) {
 			// TODO :: might need something more complicated
-			synchronized(members) {
+//			synchronized(members) {
+				aquireStateLock();
 				for (Iterator it = members.iterator (); it.hasNext (); ) {
 					it.next();
-					it.remove(); // NOTE - this is it.remove and not members.remove (which would result in a ConcurrentModificationException!)
+					it.remove(); // NOTE :: this is it.remove and not members.remove (which would result in a ConcurrentModificationException!)
 				}
 				mm.getMemberList(members);
 				printMembership();
+				//repopulateGrid();
+				//printGrid();
+				releaseStateLock();
+//			}
+		}
+	}
+	
+	// NOTE :: assumes that the state is locked already
+	private void repopulateGrid() {
+		numCols = (int) Math.ceil(Math.sqrt(members.size()));
+		numRows = (int) Math.ceil(members.size() / numCols);
+		
+		grid = new int[numCols][numRows];
+		
+		//System.out.println("Cols = " + numCols + "; Rows = " + numRows + "; Members = " + members.size());
+		int m = 0;
+		for (int i = 0; i < numRows; i++) {
+			for (int j = 0; j < numCols; j++) {
+				if (m >= members.size()) {
+					m = 0;
+				}
+				//System.out.println("i = " + i + "; j = " + j + "; m = " + m);
+				grid[i][j] = members.get(m);
+				m++;
 			}
 		}
 	}
@@ -260,6 +294,19 @@ public class NeuRonNode extends Thread implements IRonNode {
 				s += memberId + ", ";
 			}
 			s += "]";
+		}
+		System.out.println(s);
+	}
+
+	public void printGrid() {
+		String s = new String("Grid for Node " + iNodeId + ".\n");
+		if (grid != null) {
+			for (int i = 0; i < numRows; i++) {
+				for (int j = 0; j < numCols; j++) {
+					s += "\t " + grid[i][j];
+				}
+				s += "\n";
+			}
 		}
 		System.out.println(s);
 	}
