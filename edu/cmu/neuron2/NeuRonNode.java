@@ -207,6 +207,14 @@ public class NeuRonNode extends Thread implements IRonNode {
 		}
 	}
 
+	public void removeMemberNode(int node_id) {
+		if (members != null) {
+			synchronized (members) {
+				members.remove(new Integer(node_id));
+			}
+		}
+	}
+
 	public void broadcastMembershipChange() {
 		if (members != null) {
 			synchronized (members) {

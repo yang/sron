@@ -4,18 +4,16 @@ import java.util.concurrent.Semaphore;
 
 public class RoutingUpdateThread extends Thread {
 
+	public static final int PERIOD = 10000, TIMEOUT = 3 * PERIOD;
 	int iNodeId;
 	IRonNode parentHandle;
 	boolean bQuit;
-
 	Semaphore semDone;
 
 	RoutingUpdateThread(int node_id, IRonNode rn) {
 		iNodeId = node_id;
 		parentHandle = rn;
-
 		bQuit = false;
-
 		semDone = new Semaphore(0);
 	}
 
@@ -23,7 +21,7 @@ public class RoutingUpdateThread extends Thread {
 
 		while (!bQuit) {
 			try {
-				Thread.sleep(10000);
+				Thread.sleep(PERIOD);
 			} catch (InterruptedException ie) {
 			}
 
