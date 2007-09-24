@@ -28,7 +28,7 @@ public class RoutingMsg extends BaseMsg {
 		for (int i = 0; i < numNodes; i++) {
 			probeTable[i] = pt[i];
 		}
-
+		
 		/*
 		for (int i = 0; i < numNodes; i++) {
 			probeTable[i] = -1;

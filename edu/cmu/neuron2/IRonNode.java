@@ -21,6 +21,7 @@ public interface IRonNode {
 	public void handleMembershipChange(MembershipMsg mm);
 	
 	public void sendAllNeighborsAdjacencyTable();
+	public void sendAllNeighborsRoutingRecommendations();
 	public void updateNetworkState(RoutingMsg rm);
 	
 	public void quit();

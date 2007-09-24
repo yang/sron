@@ -26,6 +26,7 @@ public class RoutingUpdateThread extends Thread {
 			}
 			
 			parentHandle.sendAllNeighborsAdjacencyTable();
+			parentHandle.sendAllNeighborsRoutingRecommendations();
 		}
 		System.out.println(iNodeId + " RoutingUpdateThread quitting.");
 		semDone.release();

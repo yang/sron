@@ -5,7 +5,9 @@ import java.io.DataInputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.SocketTimeoutException;
+import java.util.ArrayList;
 import java.util.Hashtable;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.Semaphore;
 
@@ -72,9 +74,14 @@ public class RoutingUpdateServerThread extends Thread {
 					
 				} catch (SocketTimeoutException ste) {
 					// if missed 3 periods, they're dead
+					List<Integer> garbage = new ArrayList<Integer>();
 					for (Entry<Integer, Long> entry : lastTimes.entrySet())
-						if (System.currentTimeMillis() - entry.getValue() >= RoutingUpdateThread.TIMEOUT)
+						if (System.currentTimeMillis() - entry.getValue() >= RoutingUpdateThread.TIMEOUT) {
+							garbage.add(entry.getKey());
 							parentHandle.removeMemberNode(entry.getKey());
+						}
+					for (int k : garbage)
+						lastTimes.remove(k);
 				}
 			}
 			ds.close();
