@@ -1,139 +1,74 @@
 package edu.cmu.neuron2;
 
 import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.util.ArrayList;
-import java.util.Enumeration;
+import java.util.List;
 
 public class RonTest {
 
-    protected static String sExpInterfaceIp;
-    protected int iNumNodes;
-    protected boolean bCoOrdinator;
-    protected String sCoOrdinatorServerName;
-    protected int iCoOrdinatorServerPort;
-    protected boolean bUseQuorum;
-    
-    protected ArrayList<IRonNode> nl;
+	private static enum RunMode { SIM, DIST }
 
-    static {
-        //expInterfaceIp = getExperimentalAddress();
+	public static void main(String[] args) throws Exception {
 
-        // hack for machines with only 1 interface
-        sExpInterfaceIp = "localhost";
-    }
-    
-    private static String getExperimentalAddress() {
-        String retVal = null;
-        String expIpPrefix = "172.23.65.";
-        try {
-            Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces();
-            while(en.hasMoreElements()) {
-                NetworkInterface ni = en.nextElement();
-                Enumeration<InetAddress> en2 = ni.getInetAddresses();
-                while(en2.hasMoreElements()) {
-                    InetAddress ia = en2.nextElement();
-                    String ip = ia.getHostAddress();
-                    if (ip.startsWith(expIpPrefix)) {
-                        retVal = ip;
-                        return retVal;
-                    }
-                    /*
-                      System.out.println("Interface name:" + ni.getName() +
-                      " display name:" + ni.getDisplayName() + " " + ip);
-                    */
-                }
-            }
-        } catch (SocketException se) {
-            se.printStackTrace();
-        }
-        return retVal;
-    }
-	
-    RonTest() {
-    	nl = new ArrayList<IRonNode>();
-    	Runtime.getRuntime().addShutdownHook(new Thread() {
-    	    public void run() { 
-    	    	for (IRonNode node: nl) {
-    	    		node.quit();
-    	    	}
-    	    }
-    	});
-    }
-
-    public static void main(String[] args) throws Exception {
+		final List<IRonNode> nodes = new ArrayList<IRonNode>();
+		Runtime.getRuntime().addShutdownHook(new Thread() {
+			public void run() {
+				for (IRonNode node : nodes) {
+					node.quit();
+				}
+			}
+		});
+		String sExpInterfaceIp = "localhost";
+		int iNumNodes = 0;
+		int iNodeNum = 0;
+		String sCoOrdinatorServerName;
+		int iCoOrdinatorServerPort;
+		RunMode mode;
 		
-        sExpInterfaceIp = InetAddress.getLocalHost().getHostAddress();
-        //System.out.println("IP = " + sExpInterfaceIp);
-        if (sExpInterfaceIp != null) {
-            RonTest rn = new RonTest();
+		sExpInterfaceIp = InetAddress.getLocalHost().getHostAddress();
+		// System.out.println("IP = " + sExpInterfaceIp);
+		if (sExpInterfaceIp != null) {
+			try {
+				if (args[0].equalsIgnoreCase("sim")) {
+					mode = RunMode.SIM;
+					iNumNodes = Integer.parseInt(args[1]);
+					sCoOrdinatorServerName = args[2];
+					iCoOrdinatorServerPort = Integer.parseInt(args[3]);
+				} else if (args[0].equalsIgnoreCase("dist")) {
+					mode = RunMode.DIST;
+					iNodeNum = Integer.parseInt(args[1]);
+					sCoOrdinatorServerName = args[2];
+					iCoOrdinatorServerPort = Integer.parseInt(args[3]);
+				} else {
+					throw new RuntimeException();
+				}
+			} catch (Exception ex) {
+				System.out
+						.println("Usage: java RonTest sim numNodes CoOrdinatorServerName CoOrdinatorServerPort");
+				System.out
+						.println("Usage: java RonTest dist nodeId CoOrdinatorServerName CoOrdinatorServerPort");
+				System.exit(1);
+				return;
+			}
 
-            if (args.length != 4) {
-                System.out.println("Usage: java RonTest numNodes CoOrdinatorServerName CoOrdinatorServerPort bUseQuorum");
-                System.exit(0);
-            } else {
-                rn.iNumNodes = Integer.parseInt(args[0]);
-                rn.sCoOrdinatorServerName = args[1];
-                rn.iCoOrdinatorServerPort = Integer.parseInt(args[2]);
-                rn.bUseQuorum = Boolean.parseBoolean(args[3]);
-
-                //rn.sCoOrdinatorServerName = "localhost";
-                //rn.iCoOrdinatorServerPort = 8000;
-            }
-			
-            //rn.printProperties();
-			
-			
-            if (rn.bUseQuorum) {
-                for (int i = 0; i <= rn.iNumNodes; i++) {
-                    NeuRonNode node = new NeuRonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort);
-                    node.start();
-                    rn.nl.add(node);
-                    /*
-    				try {
-    					Thread.sleep(2000);
-    				} catch (InterruptedException ie) {
-    				}
-    				*/
-                }
-            }
-            else {
-//                for (int i = 0; i < rn.iNumNodes; i++) {
-//                    RonNode node = new RonNode(i, rn.sCoOrdinatorServerName, rn.iCoOrdinatorServerPort, rn.iNumNodes);
-//                    node.start();
-//                }
-            }
-        }
-    }
-	
-    private void printProperties() {
-        System.out.println("numNodes = " + iNumNodes);
-        System.out.println("Co-ordinator Endpoint = " + sCoOrdinatorServerName + ":" + iCoOrdinatorServerPort);
-
-        /*
-          if (bCoOrdinator) {
-          System.out.println("Member is a co-ordinator!");
-          } else {
-          System.out.println("Member is not a co-ordinator!");
-          }
-        */
-		
-        if (bUseQuorum) {
-            System.out.println("Using Grid Quorum!");
-        } else {
-            System.out.println("Using Full Mesh!");
-        }
-    }
-	
-    private boolean isPerfectSquare(int num) {
-        int sq_root = (int) Math.sqrt(num);
-        int square = sq_root * sq_root;
-		
-        if (square == num) {
-            return true;
-        }
-        return false;
-    }
+			switch (mode) {
+			case SIM:
+				for (int i = 0; i <= iNumNodes; i++) {
+					NeuRonNode node = new NeuRonNode(i,
+							sCoOrdinatorServerName,
+							iCoOrdinatorServerPort);
+					node.start();
+					nodes.add(node);
+				}
+				break;
+			case DIST:
+				NeuRonNode node = new NeuRonNode(iNodeNum,
+						sCoOrdinatorServerName, iCoOrdinatorServerPort);
+				node.start();
+				nodes.add(node);
+				break;
+			}
+		}
+	}
 
 }

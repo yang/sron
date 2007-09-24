@@ -14,11 +14,8 @@ public class MembershipUpdateServerThread extends Thread {
 	
 	int iPort;
 	int iNodeId;
-	
 	IRonNode parentHandle;
-	
 	boolean bQuit;
-
 	Semaphore semDone;
 
 	MembershipUpdateServerThread(int port, int node_id, IRonNode rn) {

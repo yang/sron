@@ -14,11 +14,8 @@ public class RoutingUpdateServerThread extends Thread {
 	
 	int iPort;
 	int iNodeId;
-	
 	IRonNode parentHandle;
-
 	boolean bQuit;
-	
 	Semaphore semDone;
 	
 	RoutingUpdateServerThread(int port, int node_id, IRonNode rn) {
