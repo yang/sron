@@ -9,7 +9,7 @@ public class RoutingUpdateThread extends Thread {
 	IRonNode parentHandle;
 	boolean bQuit;
 	Semaphore semDone;
-
+	
 	RoutingUpdateThread(int node_id, IRonNode rn) {
 		iNodeId = node_id;
 		parentHandle = rn;
@@ -18,19 +18,19 @@ public class RoutingUpdateThread extends Thread {
 	}
 
 	public void run() {
-
+		
 		while (!bQuit) {
 			try {
 				Thread.sleep(PERIOD);
 			} catch (InterruptedException ie) {
 			}
-
+			
 			parentHandle.sendAllNeighborsAdjacencyTable();
 		}
 		System.out.println(iNodeId + " RoutingUpdateThread quitting.");
 		semDone.release();
 	}
-
+	
 	public void quit() {
 		bQuit = true;
 		semDone.acquireUninterruptibly();

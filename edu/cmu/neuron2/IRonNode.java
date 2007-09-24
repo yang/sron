@@ -2,6 +2,7 @@ package edu.cmu.neuron2;
 
 import edu.cmu.neuron2.msg.InitMsg;
 import edu.cmu.neuron2.msg.MembershipMsg;
+import edu.cmu.neuron2.msg.RoutingMsg;
 
 public interface IRonNode {
 
@@ -20,6 +21,7 @@ public interface IRonNode {
 	public void handleMembershipChange(MembershipMsg mm);
 	
 	public void sendAllNeighborsAdjacencyTable();
+	public void updateNetworkState(RoutingMsg rm);
 	
 	public void quit();
 }
