@@ -10,6 +10,7 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import edu.cmu.neuron2.msg.BaseMsg;
 import edu.cmu.neuron2.msg.RoutingMsg;
@@ -19,25 +20,18 @@ public class RoutingUpdateServerThread extends Thread {
 	int iPort;
 	int iNodeId;
 	
-	IRonNode parentHandle;
+	NeuRonNode parentHandle;
+	
+	private AtomicBoolean doQuit = new AtomicBoolean();
 
-	boolean bQuit;
-	
-	Semaphore semDone;
-	
-	RoutingUpdateServerThread(int port, int node_id, IRonNode rn) {
+	RoutingUpdateServerThread(int port, int node_id, NeuRonNode rn) {
 		iPort = port;
 		iNodeId = node_id;
 		parentHandle = rn;
-
-		bQuit = false;
-
-		semDone = new Semaphore(0);
 	}
 
 	public void run() {
 		try {
-			
 			DatagramSocket ds = new DatagramSocket(iPort);
 
 			byte[] b = new byte[65536];
@@ -45,14 +39,14 @@ public class RoutingUpdateServerThread extends Thread {
 
 			Hashtable<Integer, Long> lastTimes = new Hashtable<Integer, Long>();
 
-			while (!bQuit) {
+			while (!doQuit.get()) {
 				//System.out.println(iNodeId + " RUST listening on port " + iPort);
 				ds.setSoTimeout(1000);
 				try {
 					ds.receive(dp);
 					//System.out.println(iNodeId + " RUST - incoming adjecency table!");
 					//System.out.println(iNodeId + " RUST - incoming table!");
-	
+
 						// TODO :: check that the length is the same as b.length
 						byte[] msg = dp.getData();
 					    ByteArrayInputStream bis = new ByteArrayInputStream(msg);
@@ -84,16 +78,15 @@ public class RoutingUpdateServerThread extends Thread {
 						lastTimes.remove(k);
 				}
 			}
+			System.out.println(iNodeId + " RoutingUpdateServerThread quitting.");
 			ds.close();
-		} catch (Exception e) {
-			e.printStackTrace();
+		} catch (Exception ex) {
+			throw new RuntimeException(ex);
 		}
-		System.out.println(iNodeId + " RoutingUpdateServerThread quitting.");
-		semDone.release();
 	}
-	
+
 	public void quit() {
-		bQuit = true;
-		semDone.acquireUninterruptibly();
+		doQuit.set(true);
 	}
+
 }

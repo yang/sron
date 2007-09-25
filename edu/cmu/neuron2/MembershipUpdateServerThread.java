@@ -15,13 +15,13 @@ public class MembershipUpdateServerThread extends Thread {
 	int iPort;
 	int iNodeId;
 	
-	IRonNode parentHandle;
+	NeuRonNode parentHandle;
 	
 	boolean bQuit;
 
 	Semaphore semDone;
 
-	MembershipUpdateServerThread(int port, int node_id, IRonNode rn) {
+	MembershipUpdateServerThread(int port, int node_id, NeuRonNode rn) {
 		iPort = port;
 		iNodeId = node_id;
 		parentHandle = rn;
@@ -73,8 +73,8 @@ public class MembershipUpdateServerThread extends Thread {
 			}
 			ds.close();
 			
-		} catch(Exception e) {
-			e.printStackTrace();
+		} catch(Exception ex) {
+			throw new RuntimeException(ex);
 		}
 	    System.out.println(iNodeId + " MembershipUpdateServerThread quitting.");
 		semDone.release();

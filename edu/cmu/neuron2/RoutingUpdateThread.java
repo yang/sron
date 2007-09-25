@@ -6,11 +6,11 @@ public class RoutingUpdateThread extends Thread {
 
 	public static final int PERIOD = 10000, TIMEOUT = 3 * PERIOD;
 	int iNodeId;
-	IRonNode parentHandle;
+	NeuRonNode parentHandle;
 	boolean bQuit;
 	Semaphore semDone;
 	
-	RoutingUpdateThread(int node_id, IRonNode rn) {
+	RoutingUpdateThread(int node_id, NeuRonNode rn) {
 		iNodeId = node_id;
 		parentHandle = rn;
 		bQuit = false;

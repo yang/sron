@@ -11,14 +11,14 @@ import edu.cmu.neuron2.msg.InitMsg;
 public class ClientHandlerThread extends Thread {
 
 	Socket incoming;
-	IRonNode parent;
+	NeuRonNode parent;
 	int nodeId;
 	int otherEndPointNodeId;
 	InitMsg im;
 
 	String otherEndPointIp;
 
-	public ClientHandlerThread(Socket connection, IRonNode my_parent, int node_id) {
+	public ClientHandlerThread(Socket connection, NeuRonNode my_parent, int node_id) {
 		incoming = connection;
 		parent = my_parent;
 		nodeId = node_id;
@@ -48,27 +48,27 @@ public class ClientHandlerThread extends Thread {
 				//int nid = Integer.parseInt(temp[2]);
 				im = new InitMsg(nodeId);
 			}
-			
-			parent.aquireStateLock();		// lock state (expensive locking operation)
-			parent.addMemberNode(nodeId);			// also sends out updates to other nodes!
-			parent.populateMemberList(im);
-			writer.writeObject(im);
 
-			msg = new String("");
-			done = false;
-			while (!done) {
-			    String in_msg = reader.readLine();
-			    if (in_msg != null) {
-			    	done = true;
-				    msg += in_msg;
-			    }
+			synchronized (parent) {
+				parent.addMemberNode(nodeId);			// also sends out updates to other nodes!
+				parent.populateMemberList(im);
+				writer.writeObject(im);
+	
+				msg = new String("");
+				done = false;
+				while (!done) {
+				    String in_msg = reader.readLine();
+				    if (in_msg != null) {
+				    	done = true;
+					    msg += in_msg;
+				    }
+				}
+				
+				//System.out.println("Done!");
+				reader.close();
+				writer.close();
+				incoming.close();
 			}
-			
-			//System.out.println("Done!");
-			reader.close();
-			writer.close();
-			incoming.close();
-			parent.releaseStateLock(); 		// unlock state
 			
 		} catch (IOException ioe) {
 			ioe.printStackTrace();

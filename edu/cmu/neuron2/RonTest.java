@@ -3,6 +3,8 @@ package edu.cmu.neuron2;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class RonTest {
 
@@ -10,10 +12,10 @@ public class RonTest {
 
 	public static void main(String[] args) throws Exception {
 
-		final List<IRonNode> nodes = new ArrayList<IRonNode>();
+		final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
 		Runtime.getRuntime().addShutdownHook(new Thread() {
 			public void run() {
-				for (IRonNode node : nodes) {
+				for (NeuRonNode node : nodes) {
 					node.quit();
 				}
 			}
@@ -43,27 +45,31 @@ public class RonTest {
 					throw new RuntimeException();
 				}
 			} catch (Exception ex) {
-				System.out
+				System.err
 						.println("Usage: java RonTest sim numNodes CoOrdinatorServerName CoOrdinatorServerPort");
-				System.out
+				System.err
 						.println("Usage: java RonTest dist nodeId CoOrdinatorServerName CoOrdinatorServerPort");
 				System.exit(1);
 				return;
 			}
+			
+			Network network = new Network();
+			ExecutorService executor = Executors.newCachedThreadPool();
 
 			switch (mode) {
 			case SIM:
 				for (int i = 0; i <= iNumNodes; i++) {
 					NeuRonNode node = new NeuRonNode(i,
 							sCoOrdinatorServerName,
-							iCoOrdinatorServerPort);
+							iCoOrdinatorServerPort,
+							network, executor);
 					node.start();
 					nodes.add(node);
 				}
 				break;
 			case DIST:
 				NeuRonNode node = new NeuRonNode(iNodeNum,
-						sCoOrdinatorServerName, iCoOrdinatorServerPort);
+						sCoOrdinatorServerName, iCoOrdinatorServerPort, network, executor);
 				node.start();
 				nodes.add(node);
 				break;
