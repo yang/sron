@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.mina.common.IoHandlerAdapter;
@@ -66,10 +67,8 @@ public class NeuRonNode extends Thread {
 		numCols = numRows = 0;
 		bCoordinator = iNodeId == 0;
 		cfg.getFilterChain().addLast("logger", new LoggingFilter());
-		cfg.getFilterChain().addLast(
-				"codec",
-				new ProtocolCodecFilter(
-						new ObjectSerializationCodecFactory()));
+		cfg.getFilterChain().addLast("codec",
+				new ProtocolCodecFilter(new ObjectSerializationCodecFactory()));
 
 	}
 
@@ -88,6 +87,9 @@ public class NeuRonNode extends Thread {
 				Thread.sleep(2000);
 				ServerSocket ss = new ServerSocket(basePort);
 				try {
+					// TODO the coord should also be kept aware of who's alive
+					// and who's not. this means we need to ping the coord, and
+					// the coord needs to maintain timeouts like everyone else.
 					ss.setReuseAddress(true);
 					ss.setSoTimeout(1000);
 					log("Beep!");
@@ -159,7 +161,7 @@ public class NeuRonNode extends Thread {
 							.getInputStream()).readObject();
 					log("got from coord: " + im);
 					iNodeId = im.id;
-					handleMembershipChange(im.members);
+					updateMembers(im.members);
 				} finally {
 					try {
 						s.close();
@@ -196,7 +198,7 @@ public class NeuRonNode extends Thread {
 			}
 		}
 	}
-	
+
 	private void pingAll() {
 		Msg.Ping ping = new Msg.Ping();
 		ping.time = System.currentTimeMillis();
@@ -213,17 +215,18 @@ public class NeuRonNode extends Thread {
 			Msg msg = (Msg) obj;
 			log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
 			synchronized (NeuRonNode.this) {
+				resetTimeout(msg.src);
 				if (msg instanceof Msg.Membership) {
-					handleMembershipChange(((Msg.Membership) msg).members);
+					updateMembers(((Msg.Membership) msg).members);
 				} else if (msg instanceof Msg.Routing) {
 					updateNetworkState((Msg.Routing) msg);
 				} else if (msg instanceof Msg.RoutingRecs) {
 					// TODO something
-				} else if (msg instanceof Msg.Ping) { 
+				} else if (msg instanceof Msg.Ping) {
 					Msg.Ping ping = ((Msg.Ping) msg);
 					Msg.Pong pong = new Msg.Pong();
 					pong.time = ping.time;
-					handleMembershipChange(ping.info);
+					addMember(ping.info);
 					sendObject(pong, ping.info.id);
 				} else if (msg instanceof Msg.Pong) {
 					Msg.Pong pong = (Msg.Pong) msg;
@@ -231,10 +234,33 @@ public class NeuRonNode extends Thread {
 					log("got pong msg with latency " + latency);
 					// TODO do something with the latency
 				} else {
-					throw new Exception("received unknown message type");
+					throw new Exception("can't handle that message type");
 				}
 			}
 		}
+	}
+
+	/**
+	 * If we don't hear from a node for this number of seconds, then consider
+	 * them dead.
+	 */
+	private int TIMEOUT = 10;
+	private Hashtable<Integer, ScheduledFuture<?>> timeouts = new Hashtable<Integer, ScheduledFuture<?>>();
+
+	private void resetTimeout(final int nid) {
+		ScheduledFuture<?> oldFuture = timeouts.get(nid);
+		if (oldFuture != null) {
+			oldFuture.cancel(false);
+		}
+		ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
+			public void run() {
+				synchronized (NeuRonNode.this) {
+					// TODO remove, not add
+					removeMember(nid);
+				}
+			}
+		}, TIMEOUT, TimeUnit.SECONDS);
+		timeouts.put(nid, future);
 	}
 
 	/**
@@ -276,17 +302,31 @@ public class NeuRonNode extends Thread {
 			}
 		}
 	}
-	
-	private void handleMembershipChange(NodeInfo newNode) {
+
+	private void removeMember(int nid) {
+		log("removing dead node " + nid);
+		nodes.remove(nid);
+		updateMembers(new ArrayList<NodeInfo>(nodes.values()));
+	}
+
+	private void addMember(NodeInfo newNode) {
 		if (!nodes.containsKey(newNode.id)) {
 			log("adding new node: " + newNode.id);
 			List<NodeInfo> infos = new ArrayList<NodeInfo>(nodes.values());
 			infos.add(newNode);
-			handleMembershipChange(infos);
+			updateMembers(infos);
 		}
 	}
 
-	private void handleMembershipChange(List<NodeInfo> newNodes) {
+	private void updateMembers(List<NodeInfo> newNodes) {
+		// If this is our initial seed, then treat it specially: initialize the
+		// timeouts for all the mentioned nodes. This is so that if the coord
+		// tells us about some nodes that are actually dead, we can actually
+		// eventually determine that they're dead (using these timeouts).
+		if (nodes.isEmpty())
+			for (NodeInfo node : newNodes)
+				if (node.id != iNodeId)
+					resetTimeout(node.id);
 		nodes.clear();
 		for (NodeInfo node : newNodes)
 			nodes.put(node.id, node);
@@ -419,16 +459,16 @@ public class NeuRonNode extends Thread {
 	}
 
 	private void sendObject(final Msg o, int nid) {
-		log("sending " + o.getClass().getSimpleName() + " to " + nid + " living at " + (basePort + nid));
+		log("sending " + o.getClass().getSimpleName() + " to " + nid
+				+ " living at " + (basePort + nid));
 		o.src = iNodeId;
-		new DatagramConnector().connect(
-				new InetSocketAddress(nodes.get(nid).addr, basePort + nid),
-				new IoHandlerAdapter() {
-					@Override
-					public void sessionCreated(IoSession session) {
-						session.write(o);
-					}
-				}, cfg);
+		new DatagramConnector().connect(new InetSocketAddress(
+				nodes.get(nid).addr, basePort + nid), new IoHandlerAdapter() {
+			@Override
+			public void sessionCreated(IoSession session) {
+				session.write(o);
+			}
+		}, cfg);
 	}
 
 	private synchronized void sendAllNeighborsAdjacencyTable() {
@@ -442,7 +482,6 @@ public class NeuRonNode extends Thread {
 	}
 
 	private synchronized void updateNetworkState(Msg.Routing rm) {
-		// TODO make this more robust
 		int offset = memberNids().indexOf(rm.id);
 		if (offset != -1) {
 			for (int i = 0; i < rm.probeTable.length; i++) {
