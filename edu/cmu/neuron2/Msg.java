@@ -7,10 +7,10 @@ import java.util.ArrayList;
 public class Msg implements Serializable {
 	
 	public int src;
+	public int version;
 
 	public static final class Join extends Msg {
 		public InetAddress addr;
-		public int port;
 	}
 
 	public static final class Init extends Msg {
@@ -19,7 +19,6 @@ public class Msg implements Serializable {
 	}
 
 	public static final class Membership extends Msg {
-		public int id; // membership msg from node with this id
 		public ArrayList<NodeInfo> members;
 		public int numNodes;
 	}
@@ -54,10 +53,12 @@ public class Msg implements Serializable {
 		public long time;
 	}
 
-	public static final class Routing extends Msg {
-		public int id; // routing msg from node with this id
+	public static final class Measurements extends Msg {
 		public ArrayList<Integer> membershipList;
 		public int[] probeTable;
+	}
+	
+	public static final class MemberPoll extends Msg {
 	}
 
 }
