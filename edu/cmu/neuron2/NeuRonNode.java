@@ -1,44 +1,45 @@
 package edu.cmu.neuron2;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
-import java.net.DatagramPacket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
-import edu.cmu.neuron2.msg.InitMsg;
-import edu.cmu.neuron2.msg.MembershipMsg;
-import edu.cmu.neuron2.msg.RoutingMsg;
+import org.apache.mina.common.IoHandlerAdapter;
+import org.apache.mina.common.IoServiceConfig;
+import org.apache.mina.common.IoSession;
+import org.apache.mina.filter.LoggingFilter;
+import org.apache.mina.filter.codec.ProtocolCodecFilter;
+import org.apache.mina.filter.codec.serialization.ObjectSerializationCodecFactory;
+import org.apache.mina.transport.socket.nio.DatagramAcceptor;
+import org.apache.mina.transport.socket.nio.DatagramAcceptorConfig;
+import org.apache.mina.transport.socket.nio.DatagramConnector;
 
 public class NeuRonNode extends Thread {
 	private final ExecutorService executor;
-	private final Network network;
+	private final ScheduledExecutorService scheduler;
 	private int iNodeId; // TODO non final
 	private final boolean bCoordinator;
 	private final String sCoordinatorIp;
-	private final int iCoordinatorPort;
-	private boolean doQuit = false;
+	private final int basePort;
+	private boolean doQuit;
 
-	private MembershipUpdateServerThread must;
-	private RoutingUpdateServerThread rust;
-	private RoutingUpdateThread rut;
+	private final Hashtable<Integer, NodeInfo> nodes = new Hashtable<Integer, NodeInfo>();
 
-	Semaphore semStateLock;
-
-	int nodeIndex;
-	ArrayList<Integer> members;
 	int[][] probeTable; // probeTable[i] = node members[i]'s probe table. value
 	// at index j in row i is the link latency between nodes
 	// members[i]->members[j].
@@ -47,47 +48,38 @@ public class NeuRonNode extends Thread {
 	// TODO non final
 	private int[][] grid;
 	private int numCols, numRows;
-	private final ArrayList<Integer> neighbors;
+	private final HashSet<Integer> neighbors = new HashSet<Integer>();
+	private final IoServiceConfig cfg = new DatagramAcceptorConfig();
 
-	Random generator;
+	private Random generator;
 
-	public NeuRonNode(int id, String cName, int cPort, Network network,
-			ExecutorService executor) {
+	public NeuRonNode(int id, String cName, int cPort,
+			ExecutorService executor, ScheduledExecutorService scheduler) {
 		iNodeId = id;
-		nodeIndex = 0;
 		sCoordinatorIp = cName;
-		iCoordinatorPort = cPort;
-		this.network = network;
+		basePort = cPort;
 		this.executor = executor;
-
-		must = null;
-		rust = null;
-		rut = null;
-
+		this.scheduler = scheduler;
 		generator = new Random(iNodeId);
-
-		semStateLock = new Semaphore(1);
-
-		members = new ArrayList<Integer>();
 		probeTable = null;
 		// bestHopTable = new ArrayList<Integer>();
 		grid = null;
 		numCols = numRows = 0;
-		neighbors = new ArrayList<Integer>();
+		bCoordinator = iNodeId == 0;
+		cfg.getFilterChain().addLast("logger", new LoggingFilter());
+		cfg.getFilterChain().addLast(
+				"codec",
+				new ProtocolCodecFilter(
+						new ObjectSerializationCodecFactory()));
 
-		if (iNodeId == 0) {
-			bCoordinator = true;
-		} else {
-			bCoordinator = false;
-		}
 	}
 
-	public void log(String msg) {
-		System.out.println("node " + iNodeId + ":\n" + msg);
+	private void log(String msg) {
+		System.out.println("node " + iNodeId + ":\n  " + msg);
 	}
 
-	public void err(String msg) {
-		System.out.println("node " + iNodeId + ":\n" + msg);
+	private void err(String msg) {
+		System.out.println("node " + iNodeId + ":\n  " + msg);
 	}
 
 	public void run() {
@@ -95,7 +87,7 @@ public class NeuRonNode extends Thread {
 			try {
 				int nextNodeId = 0;
 				Thread.sleep(2000);
-				ServerSocket ss = new ServerSocket(iCoordinatorPort);
+				ServerSocket ss = new ServerSocket(basePort);
 				try {
 					ss.setReuseAddress(true);
 					ss.setSoTimeout(1000);
@@ -111,24 +103,17 @@ public class NeuRonNode extends Thread {
 						executor.submit(new Runnable() {
 							public void run() {
 								try {
-									BufferedReader reader = new BufferedReader(
-											new InputStreamReader(incoming
-													.getInputStream()));
+									Msg.Join msg = (Msg.Join) new ObjectInputStream(
+											incoming.getInputStream())
+											.readObject();
 									try {
-										// TODO trim?
-										StringBuffer buf = new StringBuffer();
-										while (true) {
-											String line = reader.readLine();
-											if (line != null) {
-												buf.append(line);
-												break;
-											}
-										}
-
-										InitMsg im = new InitMsg(nodeId);
+										Msg.Init im = new Msg.Init();
+										im.id = nodeId;
 										synchronized (NeuRonNode.this) {
-											addMemberNode(nodeId);
-											populateMemberList(im);
+											addMemberNode(nodeId, msg.addr,
+													msg.port);
+											im.members = new ArrayList<NodeInfo>(
+													nodes.values());
 										}
 										new ObjectOutputStream(incoming
 												.getOutputStream())
@@ -149,19 +134,13 @@ public class NeuRonNode extends Thread {
 			} catch (Exception ex) {
 				throw new RuntimeException(ex);
 			}
-		}
-
-		// if you are not a co-ordinator
-		// a. join the overlay by contacting the co-ordinator
-		// b. start a server thread to listen to routing updates
-		// c. send routing updates to everyone else.
-		else {
+		} else {
 			try {
 				Socket s;
 				while (true) {
 					// Connect to the co-ordinator
 					try {
-						s = new Socket(sCoordinatorIp, iCoordinatorPort);
+						s = new Socket(sCoordinatorIp, basePort);
 						break;
 					} catch (Exception ex) {
 						log("couldn't connect to coord, retrying in 1 sec");
@@ -172,16 +151,16 @@ public class NeuRonNode extends Thread {
 				try {
 					// talk to coordinator
 					log("sending join");
-					new DataOutputStream(s.getOutputStream())
-							.writeBytes("join "
-									+ InetAddress.getLocalHost()
-											.getHostAddress() + " " + iNodeId
-									+ "\n");
-					InitMsg im = (InitMsg) new ObjectInputStream(s
+					Msg.Join msg = new Msg.Join();
+					msg.addr = InetAddress.getLocalHost();
+					new ObjectOutputStream(s.getOutputStream())
+							.writeObject(msg);
+
+					Msg.Init im = (Msg.Init) new ObjectInputStream(s
 							.getInputStream()).readObject();
-					log("got from coord: " + im.toString());
-					iNodeId = im.getId();
-					handleMembershipChange(im);
+					log("got from coord: " + im);
+					iNodeId = im.id;
+					handleMembershipChange(im.members);
 				} finally {
 					try {
 						s.close();
@@ -193,189 +172,154 @@ public class NeuRonNode extends Thread {
 				throw new RuntimeException(ex);
 			}
 
-			// start a thread, that listens on port (iCoordinatorPort +
-			// iNodeId), to look-out for routing updates
-			rust = new RoutingUpdateServerThread(iCoordinatorPort + iNodeId,
-					iNodeId, this);
-			rust.start();
+			try {
+				new DatagramAcceptor().bind(new InetSocketAddress(basePort
+						+ iNodeId), new Receiver(), cfg);
+				log("server started");
 
-			// start a thread, that listens on port ((iCoordinatorPort +
-			// 1000) + iNodeId), to look-out for routing updates
-			must = new MembershipUpdateServerThread((iCoordinatorPort + 1000)
-					+ iNodeId, iNodeId, this);
-			must.start();
-
-			// start a thread, that loops and send routing updates
-			// periodically
-			rut = new RoutingUpdateThread(iNodeId, this);
-			rut.start();
-		}
-	}
-
-	public void addMemberNode(int node_id) {
-		if (members != null) {
-			synchronized (members) {
-				boolean bFlag = false;
-				for (Integer nid : members) {
-					if (nid == node_id) {
-						bFlag = true;
-						break;
-					}
-				}
-				if (bFlag == false) {
-					members.add(new Integer(node_id));
-					broadcastMembershipChange(node_id);
-				}
-			}
-		}
-	}
-
-	public void removeMemberNode(int node_id) {
-		if (members != null) {
-			log(node_id + " is dead to me");
-			synchronized (members) {
-				members.remove(new Integer(node_id));
-			}
-		}
-	}
-
-	public void broadcastMembershipChange() {
-		if (members != null) {
-			synchronized (members) {
-
-				for (Integer memberId : members) {
-					// XXX: we are using the co-ords ip (but that's ok, because
-					// this is run on a single machine)
-					try {
-						Socket s = new Socket(sCoordinatorIp,
-								(iCoordinatorPort + 1000) + memberId);
-						BufferedReader reader = new BufferedReader(
-								new InputStreamReader(s.getInputStream()));
-						ObjectOutputStream writer = new ObjectOutputStream(s
-								.getOutputStream());
-						MembershipMsg mm = new MembershipMsg(iNodeId, members);
-						writer.writeObject(mm);
-						reader.close();
-						writer.close();
-						s.close();
-					} catch (Exception e) {
-						e.printStackTrace();
-					}
-				}
-			}
-		}
-	}
-
-	public void broadcastMembershipChange(int exceptionNodeId) {
-		if (members != null) {
-			synchronized (members) {
-
-				for (Integer memberId : members) {
-					if (memberId != exceptionNodeId) {
-						// XXX: we are using the co-ords ip (but that's ok,
-						// because this is run on a single machine)
-						try {
-							log("sending to port: "
-									+ ((iCoordinatorPort + 1000) + memberId));
-
-							MembershipMsg mm = new MembershipMsg(iNodeId,
-									members);
-							byte[] buf = MembershipMsg.getBytes(mm);
-							InetAddress sAddr = InetAddress
-									.getByName(sCoordinatorIp);
-							DatagramPacket packet = new DatagramPacket(buf,
-									buf.length, sAddr,
-									((iCoordinatorPort + 1000) + memberId));
-							network.send(packet);
-						} catch (Exception e) {
-							e.printStackTrace();
+				scheduler.scheduleAtFixedRate(new Runnable() {
+					public void run() {
+						synchronized (NeuRonNode.this) {
+							pingAll();
 						}
 					}
+				}, 1, 10, TimeUnit.SECONDS);
+				scheduler.scheduleAtFixedRate(new Runnable() {
+					public void run() {
+						synchronized (NeuRonNode.this) {
+							sendAllNeighborsAdjacencyTable();
+							sendAllNeighborsRoutingRecommendations();
+						}
+					}
+				}, 1, 10, TimeUnit.SECONDS);
+			} catch (IOException ex) {
+				throw new RuntimeException(ex);
+			}
+		}
+	}
+	
+	private void pingAll() {
+		Msg.Ping ping = new Msg.Ping();
+		ping.time = System.currentTimeMillis();
+		ping.info = nodes.get(iNodeId);
+		for (int nid : nodes.keySet()) {
+			sendObject(ping, nid);
+		}
+	}
+
+	public final class Receiver extends IoHandlerAdapter {
+		@Override
+		public void messageReceived(IoSession session, Object msg)
+				throws Exception {
+			synchronized (NeuRonNode.this) {
+				if (msg instanceof Msg.Membership) {
+					log("got membership msg " + msg);
+					handleMembershipChange(((Msg.Membership) msg).members);
+				} else if (msg instanceof Msg.Routing) {
+					log("got routing msg " + msg);
+					updateNetworkState((Msg.Routing) msg);
+				} else if (msg instanceof Msg.RoutingRecs) {
+					log("got routing recs msg " + msg);
+					// TODO something
+				} else if (msg instanceof Msg.Ping) { 
+					log("got ping msg " + msg);
+					Msg.Ping ping = ((Msg.Ping) msg);
+					Msg.Pong pong = new Msg.Pong();
+					pong.time = ping.time;
+					handleMembershipChange(ping.info);
+					sendObject(pong, ping.info.id);
+				} else if (msg instanceof Msg.Pong) {
+					Msg.Pong pong = (Msg.Pong) msg;
+					long latency = System.currentTimeMillis() - pong.time;
+					log("got pong msg with latency " + latency);
+					// TODO do something with the latency
+				} else {
+					throw new Exception("received unknown message type");
 				}
 			}
 		}
 	}
 
-	public void populateMemberList(InitMsg im) {
-		if (im != null) {
-			synchronized (members) {
-				im.initMemberList(members);
-			}
+	/**
+	 * a coordinator-only method
+	 */
+	private void addMemberNode(int newNid, InetAddress addr, int port) {
+		if (!nodes.contains(newNid)) {
+			NodeInfo info = new NodeInfo();
+			info.id = newNid;
+			info.addr = addr;
+			info.port = port;
+			nodes.put(newNid, info);
 		}
 	}
 
-	public void readInMemberList(InitMsg im) {
-		if (im != null) {
-			synchronized (members) {
-				im.getMemberList(members);
+	/**
+	 * garbage collect node_id because we think he's dead
+	 * 
+	 * @param node_id
+	 */
+	private void removeMemberNode(int node_id) {
+		log(node_id + " is dead to me");
+		nodes.remove(node_id);
+	}
+
+	private ArrayList<Integer> memberNids() {
+		ArrayList<Integer> nids = new ArrayList<Integer>(nodes.keySet());
+		Collections.sort(nids);
+		return nids;
+	}
+
+	private void broadcastMembershipChange(int exceptNid) {
+		for (int nid : nodes.keySet()) {
+			if (nid != exceptNid) {
+				Msg.Membership msg = new Msg.Membership();
+				msg.id = iNodeId;
+				msg.members = new ArrayList<NodeInfo>(nodes.values());
+				sendObject(msg, nid);
 			}
 		}
 	}
+	
+	private void handleMembershipChange(NodeInfo newNode) {
+		List<NodeInfo> infos = new ArrayList<NodeInfo>(nodes.values());
+		infos.add(newNode);
+		handleMembershipChange(infos);
+	}
 
-	public synchronized void handleMembershipChange(MembershipMsg mm) {
-		/*
-		 * for (Iterator it = members.iterator (); it.hasNext (); ) {
-		 * it.next(); it.remove(); // NOTE :: this is it.remove and not
-		 * members.remove (which would result in a
-		 * ConcurrentModificationException!) }
-		 */
-		members.clear();
-		mm.getMemberList(members);
-		nodeIndex = getOffsetInMemberList(iNodeId);
-		printMembership();
-
-		probeTable = new int[members.size()][members.size()];
+	private void handleMembershipChange(List<NodeInfo> newNodes) {
+		nodes.clear();
+		for (NodeInfo node : newNodes)
+			nodes.put(node.id, node);
+		probeTable = new int[nodes.size()][nodes.size()];
 		repopulateGrid();
-
 		printGrid();
 		printNeighborList();
 	}
 
-	private synchronized void handleMembershipChange(InitMsg im) {
-		im.getMemberList(members);
-		nodeIndex = getOffsetInMemberList(iNodeId);
-		// printMembership();
-
-		probeTable = new int[members.size()][members.size()];
-		repopulateGrid();
-
-		printGrid();
-		printNeighborList();
-	}
-
-	// NOTE :: assumes that the state is locked already
+	/**
+	 * TODO XXX OPEN QUESTION HOW TO HANDLE NODE WORLD VIEW INCONSISTENCIES????
+	 */
 	private void repopulateGrid() {
-		numCols = (int) Math.ceil(Math.sqrt(members.size()));
-		numRows = (int) Math.ceil((double) members.size() / (double) numCols);
-
+		numCols = (int) Math.ceil(Math.sqrt(nodes.size()));
+		numRows = (int) Math.ceil((double) nodes.size() / (double) numCols);
 		grid = new int[numRows][numCols];
-
+		List<Integer> nids = memberNids();
 		int m = 0;
 		for (int i = 0; i < numRows; i++) {
 			for (int j = 0; j < numCols; j++) {
-				if (m >= members.size()) {
+				if (m >= nids.size()) {
 					m = 0;
 				}
-				grid[i][j] = members.get(m);
+				grid[i][j] = nids.get(m);
 				m++;
 			}
 		}
-
 		repopulateNeighborList();
 		repopulateProbeTable();
 	}
 
-	// NOTE :: assumes that the state is locked already
 	private void repopulateNeighborList() {
-		if (neighbors != null) {
-			/*
-			 * for (Iterator it = neighbors.iterator (); it.hasNext (); ) {
-			 * it.next(); it.remove(); // NOTE :: this is it.remove and not
-			 * members.remove (which would result in a
-			 * ConcurrentModificationException!) }
-			 */
-			neighbors.clear();
-		}
+		neighbors.clear();
 		for (int i = 0; i < numRows; i++) {
 			for (int j = 0; j < numCols; j++) {
 				if (grid[i][j] == iNodeId) {
@@ -383,12 +327,12 @@ public class NeuRonNode extends Thread {
 					// belong to us :)
 					for (int x = 0; x < numCols; x++) {
 						if (grid[i][x] != iNodeId) {
-							addNeighborNode(grid[i][x]);
+							neighbors.add(grid[i][x]);
 						}
 					}
 					for (int x = 0; x < numRows; x++) {
 						if (grid[x][j] != iNodeId) {
-							addNeighborNode(grid[x][j]);
+							neighbors.add(grid[x][j]);
 						}
 					}
 				}
@@ -396,9 +340,9 @@ public class NeuRonNode extends Thread {
 		}
 	}
 
-	// NOTE :: assumes that the state is locked already
 	private void repopulateProbeTable() {
-		for (int i = 0; i < members.size(); i++) {
+		int nodeIndex = memberNids().indexOf(iNodeId);
+		for (int i = 0; i < memberNids().size(); i++) {
 			if (i == nodeIndex) {
 				probeTable[i][i] = 0;
 			} else {
@@ -408,7 +352,7 @@ public class NeuRonNode extends Thread {
 
 		// for testing
 		if (nodeIndex == 0) {
-			for (int i = 1; i < members.size(); i++) {
+			for (int i = 1; i < memberNids().size(); i++) {
 				probeTable[nodeIndex][i] = 1;
 			}
 		} else {
@@ -416,39 +360,17 @@ public class NeuRonNode extends Thread {
 		}
 	}
 
-	// NOTE :: assumes that the state is locked already
-	private void addNeighborNode(int node_id) {
-		synchronized (neighbors) {
-			boolean bFlag = false;
-			for (Integer nid : neighbors) {
-				if (nid == node_id) {
-					bFlag = true;
-					break;
-				}
-			}
-			if (bFlag == false) {
-				neighbors.add(new Integer(node_id));
-			}
-		}
-	}
-
-	public int getCoordinatorPort() {
-		return iCoordinatorPort;
-	}
-
-	public void printMembership() {
+	private void printMembership() {
 		String s = new String("Membership for Node " + iNodeId
 				+ ". Membership = [");
-		synchronized (members) {
-			for (Integer memberId : members) {
-				s += memberId + ", ";
-			}
-			s += "]";
+		for (Integer memberId : memberNids()) {
+			s += memberId + ", ";
 		}
+		s += "]";
 		log(s);
 	}
 
-	public void printNeighborList() {
+	private void printNeighborList() {
 		String s = new String("Neighbors for Node " + iNodeId
 				+ ". Neighbors = [");
 		synchronized (neighbors) {
@@ -460,7 +382,7 @@ public class NeuRonNode extends Thread {
 		log(s);
 	}
 
-	public void printGrid() {
+	private void printGrid() {
 		String s = new String("Grid for Node " + iNodeId + ".\n");
 		if (grid != null) {
 			for (int i = 0; i < numRows; i++) {
@@ -473,111 +395,64 @@ public class NeuRonNode extends Thread {
 		log(s);
 	}
 
-	private static final class RoutingRec implements Serializable {
-		public int dst;
-		public int via; // the hop
-
-		public RoutingRec(int dst, int via) {
-			this.dst = dst;
-			this.via = via;
-		}
-	}
-
 	/**
 	 * for each neighbor, find for him the min-cost hops to all other neighbors,
 	 * and send this info to him (the intermediate node may be one of the
 	 * endpoints, meaning a direct route is cheapest)
 	 */
-	public synchronized void sendAllNeighborsRoutingRecommendations() {
-		for (int nid : neighbors) {
-			ArrayList<RoutingRec> recs = new ArrayList<RoutingRec>();
+	private synchronized void sendAllNeighborsRoutingRecommendations() {
+		for (int src : neighbors) {
+			ArrayList<Msg.RoutingRecs.Rec> recs = new ArrayList<Msg.RoutingRecs.Rec>();
 			int min = Integer.MAX_VALUE, mini = -1;
 			for (int dst : neighbors) {
-				int srci = getOffsetInMemberList(nid);
-				int dsti = getOffsetInMemberList(dst);
-				for (int i = 0; i < probeTable[srci].length; i++) {
-					int cur = probeTable[srci][i] + probeTable[dsti][i];
+				for (int i = 0; i < probeTable[src].length; i++) {
+					int cur = probeTable[src][i] + probeTable[dst][i];
 					if (cur < min) {
 						min = cur;
 						mini = i;
 					}
 				}
-				recs.add(new RoutingRec(dst, mini));
+				recs.add(new Msg.RoutingRecs.Rec(dst, mini));
 			}
-			sendObject(recs, nid);
+			Msg.RoutingRecs msg = new Msg.RoutingRecs();
+			msg.recs = recs;
+			sendObject(msg, src);
 		}
 	}
 
-	public void sendObject(Serializable o, int nid) {
-		ByteArrayOutputStream buf = new ByteArrayOutputStream();
-		try {
-			new ObjectOutputStream(buf).writeObject(o);
-		} catch (IOException ex) {
-			throw new RuntimeException(ex);
-		}
-		sendBytes(buf.toByteArray(), nid);
+	private void sendObject(final Serializable o, int nid) {
+		log("sending msg to " + nid + " living at " + (basePort + nid));
+		new DatagramConnector().connect(
+				new InetSocketAddress(nodes.get(nid).addr, basePort + nid),
+				new IoHandlerAdapter() {
+					@Override
+					public void sessionCreated(IoSession session) {
+						session.write(o);
+					}
+				}, cfg);
 	}
 
-	public void sendBytes(byte[] buf, int nid) {
-		try {
-			// TODO are we sure we're sending to the right host here? (should be
-			// a function of nid)
-			InetAddress addr = InetAddress.getByName(sCoordinatorIp);
-			int port = iCoordinatorPort + nid;
-			DatagramPacket p = new DatagramPacket(buf, buf.length, addr, port);
-			network.send(p);
-		} catch (Exception ex) {
-			throw new RuntimeException(ex);
-		}
-	}
-
-	public synchronized void sendAllNeighborsAdjacencyTable() {
-		RoutingMsg rm = new RoutingMsg(iNodeId, members, probeTable[nodeIndex]);
-
-		try {
-			byte[] buf = RoutingMsg.getBytes(rm);
-
-			for (Integer neighborId : neighbors) {
-				try {
-					// System.out.println("Node " + iNodeId + ": sending to port
-					// " + (iCoordinatorPort + neighborId));
-
-					sendBytes(buf, neighborId);
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
+	private synchronized void sendAllNeighborsAdjacencyTable() {
+		Msg.Routing rm = new Msg.Routing();
+		rm.id = iNodeId;
+		rm.membershipList = memberNids();
+		rm.probeTable = probeTable[rm.membershipList.indexOf(iNodeId)].clone();
+		for (int nid : neighbors) {
+			sendObject(rm, nid);
 		}
 	}
 
-	public synchronized void updateNetworkState(RoutingMsg rm) {
-		int offset = getOffsetInMemberList(rm.getOriginatorId());
+	private synchronized void updateNetworkState(Msg.Routing rm) {
+		// TODO make this more robust
+		int offset = memberNids().indexOf(rm.id);
 		if (offset != -1) {
-			rm.getProbeTable(probeTable[offset]);
+			for (int i = 0; i < rm.probeTable.length; i++) {
+				probeTable[offset][i] = rm.probeTable[i];
+			}
 		}
-	}
-
-	// NOTE :: assumes that the state is locked already
-	private int getOffsetInMemberList(int nid) {
-		for (int i = 0; i < members.size(); i++) {
-			if (nid == members.get(i))
-				return i;
-		}
-		return -1;
 	}
 
 	public void quit() {
-		doQuit = true;
-		if (must != null) {
-			must.quit();
-		}
-		if (rust != null) {
-			rust.quit();
-		}
-		if (rut != null) {
-			rut.quit();
-		}
+		this.doQuit = true;
 	}
 }

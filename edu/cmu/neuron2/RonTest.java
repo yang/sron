@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 public class RonTest {
 
@@ -53,8 +54,8 @@ public class RonTest {
 				return;
 			}
 			
-			Network network = new Network();
 			ExecutorService executor = Executors.newCachedThreadPool();
+			ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
 			switch (mode) {
 			case SIM:
@@ -62,14 +63,14 @@ public class RonTest {
 					NeuRonNode node = new NeuRonNode(i,
 							sCoOrdinatorServerName,
 							iCoOrdinatorServerPort,
-							network, executor);
+							executor, scheduler);
 					node.start();
 					nodes.add(node);
 				}
 				break;
 			case DIST:
 				NeuRonNode node = new NeuRonNode(iNodeNum,
-						sCoOrdinatorServerName, iCoOrdinatorServerPort, network, executor);
+						sCoOrdinatorServerName, iCoOrdinatorServerPort, executor, scheduler);
 				node.start();
 				nodes.add(node);
 				break;
