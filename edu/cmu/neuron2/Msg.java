@@ -5,6 +5,8 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 
 public class Msg implements Serializable {
+	
+	public int src;
 
 	public static final class Join extends Msg {
 		public InetAddress addr;

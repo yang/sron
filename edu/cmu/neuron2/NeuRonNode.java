@@ -3,7 +3,6 @@ package edu.cmu.neuron2;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.io.Serializable;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -183,7 +182,7 @@ public class NeuRonNode extends Thread {
 							pingAll();
 						}
 					}
-				}, 1, 10, TimeUnit.SECONDS);
+				}, 1, 5, TimeUnit.SECONDS);
 				scheduler.scheduleAtFixedRate(new Runnable() {
 					public void run() {
 						synchronized (NeuRonNode.this) {
@@ -202,27 +201,25 @@ public class NeuRonNode extends Thread {
 		Msg.Ping ping = new Msg.Ping();
 		ping.time = System.currentTimeMillis();
 		ping.info = nodes.get(iNodeId);
-		for (int nid : nodes.keySet()) {
-			sendObject(ping, nid);
-		}
+		for (int nid : nodes.keySet())
+			if (nid != iNodeId)
+				sendObject(ping, nid);
 	}
 
 	public final class Receiver extends IoHandlerAdapter {
 		@Override
-		public void messageReceived(IoSession session, Object msg)
+		public void messageReceived(IoSession session, Object obj)
 				throws Exception {
+			Msg msg = (Msg) obj;
+			log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
 			synchronized (NeuRonNode.this) {
 				if (msg instanceof Msg.Membership) {
-					log("got membership msg " + msg);
 					handleMembershipChange(((Msg.Membership) msg).members);
 				} else if (msg instanceof Msg.Routing) {
-					log("got routing msg " + msg);
 					updateNetworkState((Msg.Routing) msg);
 				} else if (msg instanceof Msg.RoutingRecs) {
-					log("got routing recs msg " + msg);
 					// TODO something
 				} else if (msg instanceof Msg.Ping) { 
-					log("got ping msg " + msg);
 					Msg.Ping ping = ((Msg.Ping) msg);
 					Msg.Pong pong = new Msg.Pong();
 					pong.time = ping.time;
@@ -281,9 +278,12 @@ public class NeuRonNode extends Thread {
 	}
 	
 	private void handleMembershipChange(NodeInfo newNode) {
-		List<NodeInfo> infos = new ArrayList<NodeInfo>(nodes.values());
-		infos.add(newNode);
-		handleMembershipChange(infos);
+		if (!nodes.containsKey(newNode.id)) {
+			log("adding new node: " + newNode.id);
+			List<NodeInfo> infos = new ArrayList<NodeInfo>(nodes.values());
+			infos.add(newNode);
+			handleMembershipChange(infos);
+		}
 	}
 
 	private void handleMembershipChange(List<NodeInfo> newNodes) {
@@ -373,12 +373,10 @@ public class NeuRonNode extends Thread {
 	private void printNeighborList() {
 		String s = new String("Neighbors for Node " + iNodeId
 				+ ". Neighbors = [");
-		synchronized (neighbors) {
-			for (Integer neighborId : neighbors) {
-				s += neighborId + ", ";
-			}
-			s += "]";
+		for (int neighborId : neighbors) {
+			s += neighborId + ", ";
 		}
+		s += "]";
 		log(s);
 	}
 
@@ -420,8 +418,9 @@ public class NeuRonNode extends Thread {
 		}
 	}
 
-	private void sendObject(final Serializable o, int nid) {
-		log("sending msg to " + nid + " living at " + (basePort + nid));
+	private void sendObject(final Msg o, int nid) {
+		log("sending " + o.getClass().getSimpleName() + " to " + nid + " living at " + (basePort + nid));
+		o.src = iNodeId;
 		new DatagramConnector().connect(
 				new InetSocketAddress(nodes.get(nid).addr, basePort + nid),
 				new IoHandlerAdapter() {
