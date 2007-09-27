@@ -1,5 +1,6 @@
 package edu.cmu.neuron2;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -61,6 +62,13 @@ public class NeuRonNode extends Thread {
     public static final int ADJ_AND_RECO_INTERVAL_IN_SEC = 10;
     public static final int PING_INTERVAL_IN_SEC = 5;
 
+    // in bytes per second
+    private double routingBandwidth, routingOverheadInBytes;
+    private long startTime, endTime;
+
+    private final ByteArrayOutputStream baos;
+    private final ObjectOutputStream oos;
+
     public NeuRonNode(int id, String cName, int cPort, ExecutorService executor, ScheduledExecutorService scheduler) {
         iNodeId = id;
         sCoordinatorIp = cName;
@@ -85,6 +93,14 @@ public class NeuRonNode extends Thread {
         cfg.getFilterChain().addLast("codec",
                 new ProtocolCodecFilter(new ObjectSerializationCodecFactory()));
 
+        routingBandwidth = routingOverheadInBytes =0;
+        startTime = System.currentTimeMillis();
+        baos = new ByteArrayOutputStream();
+        try {
+            oos = new ObjectOutputStream(baos);
+        } catch (IOException ioe) {
+            throw new RuntimeException(ioe);
+        }
     }
 
     private void log(String msg) {
@@ -192,6 +208,8 @@ public class NeuRonNode extends Thread {
                 throw new RuntimeException(ex);
             }
 
+
+            startTime = System.currentTimeMillis();
             // now start accepting pings and other msgs,
             // also start sending probes and sending out other msgs
             try {
@@ -288,8 +306,11 @@ public class NeuRonNode extends Thread {
                     }
                 }
                 else if (msg.version == currentStateVersion) {
+                    // all msgs go though the same processing loop
+                    //   (but we can live that that for now)
                     if (msg instanceof Msg.Membership) {
                         updateMembers(((Msg.Membership) msg).members);
+                        recordOverhead(msg);
                     } else if (msg instanceof Msg.Measurements) {
                         updateNetworkState((Msg.Measurements) msg);
                     } else if (msg instanceof Msg.RoutingRecs) {
@@ -612,11 +633,40 @@ public class NeuRonNode extends Thread {
     }
 
     private synchronized void handleRecommendation(ArrayList<Rec> recs) {
-        // TODO :: deal with routing recos and update nextHopTable
+        if (recs != null) {
+            for (Rec r : recs) {
+                // For the algorithm where the R-points only send recos about their neighbors:
+                // For each dst - only 2 nodes can tell us about the best hop to dst.
+                // They are out R-points. Trust them and update your entry blindly.
+                // For the algorithm where the R-points only send recos about
+                //    everyone else this logic will have to be more complex
+                //	  (like check if the reco was better)
+                nextHopTable.put(r.dst, r.via);
+            }
+        }
     }
 
+    private void recordOverhead(Msg m) {
+        try {
+            // what a retarded way to record size - need custom serialization!
+            oos.writeObject(m);
+            synchronized (this) {
+                routingOverheadInBytes = baos.size();
+            }
+            baos.reset();
+        } catch (IOException ioe) {
+            ioe.printStackTrace();
+        }
+
+    }
 
     public void quit() {
         this.doQuit = true;
+        synchronized (NeuRonNode.this) {
+            endTime = System.currentTimeMillis();
+            long deltaInSec = (endTime - startTime) * 1000;
+            routingBandwidth = routingOverheadInBytes / deltaInSec;
+        }
+        log("Routing Bandwidth = " + routingBandwidth);
     }
 }
