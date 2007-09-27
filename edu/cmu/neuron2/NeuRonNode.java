@@ -251,11 +251,14 @@ public class NeuRonNode extends Thread {
 				/*
 				 * TODO Add something similar to resetTimeout here, but rather
 				 * than have it change the membership set, just have it note
-				 * that we can no longer contact that node, so we should try to
-				 * find something else. Don't change the membership set because
-				 * we want everyone's world views to be consistent. Remember to
-				 * make it ignore the coordinator.
+				 * that we can no longer contact that node, so we may want to
+				 * find another rendez-vous. Don't change the membership set
+				 * because we want everyone's world views to be consistent.
+				 * Remember to make it ignore the coordinator.
 				 */
+				if (msg.version > currentVersion) {
+					sendObject(new Msg.MemberPoll(), 0);
+				}
 				if (msg instanceof Msg.Membership) {
 					updateMembers(((Msg.Membership) msg).members);
 				} else if (msg instanceof Msg.Measurements) {
@@ -504,7 +507,7 @@ public class NeuRonNode extends Thread {
 		}, cfg);
 	}
 
-	private synchronized void broadcastMeasurements() {
+	private void broadcastMeasurements() {
 		Msg.Measurements rm = new Msg.Measurements();
 		rm.membershipList = memberNids();
 		rm.probeTable = probeTable[rm.membershipList.indexOf(iNodeId)].clone();
@@ -513,14 +516,14 @@ public class NeuRonNode extends Thread {
 		}
 	}
 
-	private synchronized void updateNetworkState(Msg.Measurements m) {
+	private void updateNetworkState(Msg.Measurements m) {
 		int offset = memberNids().indexOf(m.src);
 		// Make sure that we have the exact same world-views before proceeding,
 		// as otherwise the neighbor sets may be completely different. Steps can
 		// be taken to tolerate differences and to give best-recommendations
 		// based on incomplete info, but it may be better to take a step back
 		// and re-evaluate our approach to consistency as a whole first. For
-		// now, this simple approach will at least work.
+		// now, this simple central-coordinator approach will at least work.
 		if (offset != -1 && m.membershipList.equals(memberNids())) {
 			for (int i = 0; i < m.probeTable.length; i++) {
 				probeTable[offset][i] = m.probeTable[i];
