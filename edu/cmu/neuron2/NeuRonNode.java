@@ -310,7 +310,6 @@ public class NeuRonNode extends Thread {
                     //   (but we can live that that for now)
                     if (msg instanceof Msg.Membership) {
                         updateMembers(((Msg.Membership) msg).members);
-                        recordOverhead(msg);
                     } else if (msg instanceof Msg.Measurements) {
                         updateNetworkState((Msg.Measurements) msg);
                     } else if (msg instanceof Msg.RoutingRecs) {
@@ -587,6 +586,7 @@ public class NeuRonNode extends Thread {
             }
             Msg.RoutingRecs msg = new Msg.RoutingRecs();
             msg.recs = recs;
+            recordOverhead(msg);
             sendObject(msg, src);
         }
     }
@@ -613,6 +613,7 @@ public class NeuRonNode extends Thread {
         rm.membershipList = memberNids();
         rm.probeTable = probeTable[rm.membershipList.indexOf(iNodeId)].clone();
         for (int nid : neighbors) {
+            recordOverhead(rm);
             sendObject(rm, nid);
         }
     }
