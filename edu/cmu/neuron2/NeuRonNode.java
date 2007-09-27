@@ -30,6 +30,8 @@ import org.apache.mina.transport.socket.nio.DatagramAcceptor;
 import org.apache.mina.transport.socket.nio.DatagramAcceptorConfig;
 import org.apache.mina.transport.socket.nio.DatagramConnector;
 
+import edu.cmu.neuron2.Msg.RoutingRecs.Rec;
+
 public class NeuRonNode extends Thread {
     private final ExecutorService executor;
     private final ScheduledExecutorService scheduler;
@@ -50,11 +52,14 @@ public class NeuRonNode extends Thread {
     private int[][] grid;
     private int numCols, numRows;
     private final HashSet<Integer> neighbors = new HashSet<Integer>();
+    private Hashtable<Integer, Integer> nextHopTable = new Hashtable<Integer, Integer>();
     private final IoServiceConfig cfg = new DatagramAcceptorConfig();
 
     private Random generator;
-
     private int currentStateVersion;
+
+    public static final int ADJ_AND_RECO_INTERVAL_IN_SEC = 10;
+    public static final int PING_INTERVAL_IN_SEC = 5;
 
     public NeuRonNode(int id, String cName, int cPort, ExecutorService executor, ScheduledExecutorService scheduler) {
         iNodeId = id;
@@ -187,6 +192,8 @@ public class NeuRonNode extends Thread {
                 throw new RuntimeException(ex);
             }
 
+            // now start accepting pings and other msgs,
+            // also start sending probes and sending out other msgs
             try {
                 new DatagramAcceptor().bind(new InetSocketAddress(InetAddress.getLocalHost(), basePort + iNodeId),
                                             new Receiver(), cfg);
@@ -197,7 +204,7 @@ public class NeuRonNode extends Thread {
                             pingAll();
                         }
                     }
-                }, 1, 5, TimeUnit.SECONDS);
+                }, 1, PING_INTERVAL_IN_SEC, TimeUnit.SECONDS);
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
                         synchronized (NeuRonNode.this) {
@@ -205,7 +212,7 @@ public class NeuRonNode extends Thread {
                             broadcastRecommendations();
                         }
                     }
-                }, 1, 10, TimeUnit.SECONDS);
+                }, 1, ADJ_AND_RECO_INTERVAL_IN_SEC, TimeUnit.SECONDS);
             } catch (IOException ex) {
                 throw new RuntimeException(ex);
             }
@@ -225,12 +232,16 @@ public class NeuRonNode extends Thread {
            i.e. each node notices that no other node can reach a node (say X),
            then each node sends the co-ord a msg saying that "i think X is dead".
            The sending of this msg can be staggered in time so that the co-ord is not flooded with mesgs.
+           The co-ordinator can then make a decision on keeping or removing node Y from the membership.
            On seeing a subsequent msg from the co-ord that X has been removed from the overlay, if a node Y
            has not sent its "i think X is dead" msg, it can cancel this event.
         */
         sendObject(ping, 0);
     }
 
+    /**
+     * coordinator's msg handling loop
+     */
     public final class CoordReceiver extends IoHandlerAdapter {
         @Override
         public void messageReceived(IoSession session, Object obj)
@@ -250,6 +261,9 @@ public class NeuRonNode extends Thread {
         }
     }
 
+    /**
+     * receiver's msg handling loop
+     */
     public final class Receiver extends IoHandlerAdapter {
         @Override
         public void messageReceived(IoSession session, Object obj)
@@ -279,7 +293,7 @@ public class NeuRonNode extends Thread {
                     } else if (msg instanceof Msg.Measurements) {
                         updateNetworkState((Msg.Measurements) msg);
                     } else if (msg instanceof Msg.RoutingRecs) {
-                        // TODO something
+                        handleRecommendation(((Msg.RoutingRecs) msg).recs);
                     } else if (msg instanceof Msg.Ping) {
                         Msg.Ping ping = ((Msg.Ping) msg);
                         Msg.Pong pong = new Msg.Pong();
@@ -314,7 +328,7 @@ public class NeuRonNode extends Thread {
      * If we don't hear from a node for this number of seconds, then consider
      * them dead.
      */
-    private int TIMEOUT = 10;
+    private int TIMEOUT = PING_INTERVAL_IN_SEC * 5;
     private Hashtable<Integer, ScheduledFuture<?>> timeouts = new Hashtable<Integer, ScheduledFuture<?>>();
 
     private void resetTimeout(final int nid) {
@@ -390,8 +404,37 @@ public class NeuRonNode extends Thread {
 
     private void updateMembers(List<NodeInfo> newNodes) {
         nodes.clear();
-        for (NodeInfo node : newNodes)
+
+        for (NodeInfo node : newNodes) {
             nodes.put(node.id, node);
+        }
+
+        Hashtable<Integer, Integer> newNextHopTable = new Hashtable<Integer, Integer>(nodes.size());
+        for (NodeInfo node : newNodes) {
+            if (node.id != iNodeId) {
+                Integer nextHop = nextHopTable.get(node.id);
+                if (nextHop == null) {
+                    // new node !
+                    newNextHopTable.put(node.id, iNodeId);
+                }
+                else {
+                    // check if this old next hop is in the new membership list
+                    if (nodes.get(nextHop) != null) {
+                        // we have some next hop that is alive - leave it as is
+                        newNextHopTable.put(node.id, nextHop);
+                    }
+                    else {
+                        // the next hop vanaished. i am next hop to this node now
+                        newNextHopTable.put(node.id, iNodeId);
+                    }
+                }
+            }
+            else {
+                newNextHopTable.put(iNodeId, iNodeId);
+            }
+        }
+        nextHopTable = newNextHopTable; // forget about the old one
+
 
         // TODO :: we lose previous measurements - need to fix this
         // repopulateProbeTable() currently fills in random values
@@ -508,14 +551,18 @@ public class NeuRonNode extends Thread {
             ArrayList<Msg.RoutingRecs.Rec> recs = new ArrayList<Msg.RoutingRecs.Rec>();
             int min = Integer.MAX_VALUE, mini = -1;
             for (int dst : neighbors) {
-                for (int i = 0; i < probeTable[src].length; i++) {
-                    int cur = probeTable[src][i] + probeTable[dst][i];
-                    if (cur < min) {
-                        min = cur;
-                        mini = i;
+                if (src != dst) {
+                    for (int i = 0; i < probeTable[src].length; i++) {
+                        // we assume bi-directional links for the time being
+                        // i.e. link from a-> b is the same as b -> a
+                        int cur = probeTable[src][i] + probeTable[dst][i];
+                        if (cur < min) {
+                            min = cur;
+                            mini = i;
+                        }
                     }
+                    recs.add(new Msg.RoutingRecs.Rec(dst, mini));
                 }
-                recs.add(new Msg.RoutingRecs.Rec(dst, mini));
             }
             Msg.RoutingRecs msg = new Msg.RoutingRecs();
             msg.recs = recs;
@@ -535,7 +582,7 @@ public class NeuRonNode extends Thread {
                                         new IoHandlerAdapter() {
             @Override
             public void sessionCreated(IoSession session) {
-                session.write(o); // TODO :: serialize object
+                session.write(o); // TODO :: need custom serialization
             }
         }, cfg);
     }
@@ -563,6 +610,11 @@ public class NeuRonNode extends Thread {
             }
         }
     }
+
+    private synchronized void handleRecommendation(ArrayList<Rec> recs) {
+        // TODO :: deal with routing recos and update nextHopTable
+    }
+
 
     public void quit() {
         this.doQuit = true;
