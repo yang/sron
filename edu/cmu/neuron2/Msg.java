@@ -16,11 +16,31 @@ public class Msg implements Serializable {
     public static final class Init extends Msg {
         public int id;
         public ArrayList<NodeInfo> members;
+
+        public String toString() {
+            String s = new String("");
+            s += "Node Id: " + id + ". Msg(" + version + ") = {";
+            for (int i = 0; i < members.size(); i++) {
+                s += members.get(i).id + ", ";
+            }
+            s += "}";
+            return s;
+        }
     }
 
     public static final class Membership extends Msg {
         public ArrayList<NodeInfo> members;
         public int numNodes;
+
+        public String toString() {
+            String s = new String("Membership Msg (" + version +
+                                  ") from Node " + src + ". Msg = [");
+            for (int i = 0; i < numNodes; i++) {
+                s += members.get(i).id + ", ";
+            }
+            s += "]";
+            return s;
+        }
     }
 
     public static final class RoutingRecs extends Msg {
@@ -56,10 +76,13 @@ public class Msg implements Serializable {
 
     public static final class Measurements extends Msg {
         public ArrayList<Integer> membershipList;
-        public int[] probeTable;
+        public long[] probeTable;
     }
 
     public static final class MemberPoll extends Msg {
+    }
+
+    public static final class PeeringRequest extends Msg {
     }
 
 }

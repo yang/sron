@@ -7,5 +7,10 @@ public class NodeInfo implements Serializable {
     public int port;
     public InetAddress addr;
     public int id;
+
+    public int hashCode()
+    {
+        return id;
+    }
 }
 
