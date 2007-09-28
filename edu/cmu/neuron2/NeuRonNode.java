@@ -66,6 +66,9 @@ public class NeuRonNode extends Thread {
     private final ByteArrayOutputStream baos;
     private final ObjectOutputStream oos;
 
+    private final boolean DEBUG = false;
+    private final boolean DUMP = true;
+
     public NeuRonNode(int id, String cName, int cPort, ExecutorService executor, ScheduledExecutorService scheduler) {
         iNodeId = id;
         sCoordinatorIp = cName;
@@ -142,6 +145,7 @@ public class NeuRonNode extends Thread {
                                         synchronized (NeuRonNode.this) {
                                             addMember(nodeId, msg.addr,
                                                       basePort + nodeId);
+                                            im.version = currentStateVersion;
                                             im.members = new ArrayList<NodeInfo>(nodes.values());
                                         }
                                         new ObjectOutputStream(incoming.getOutputStream())
@@ -191,6 +195,7 @@ public class NeuRonNode extends Thread {
                     Msg.Init im = (Msg.Init) new ObjectInputStream(s.getInputStream()).readObject();
                     assert im.id > 0;
                     iNodeId = im.id;
+                    currentStateVersion = im.version;
                     log("got from coord => " + im);
                     updateMembers(im.members);
                 } finally {
@@ -239,7 +244,7 @@ public class NeuRonNode extends Thread {
         ping.info = nodes.get(iNodeId);
         for (int nid : nodes.keySet())
             if (nid != iNodeId)
-                sendObject(ping, nid);
+                sendObject(ping, nid, DEBUG);
 
         /* send ping to the membership server (co-ord) -
            this might not be required if everone makes their own local decision
@@ -250,7 +255,7 @@ public class NeuRonNode extends Thread {
            On seeing a subsequent msg from the co-ord that X has been removed from the overlay, if a node Y
            has not sent its "i think X is dead" msg, it can cancel this event.
         */
-        sendObject(ping, 0);
+        sendObject(ping, 0, DEBUG);
     }
 
     /**
@@ -261,7 +266,14 @@ public class NeuRonNode extends Thread {
         public void messageReceived(IoSession session, Object obj)
                 throws Exception {
             Msg msg = (Msg) obj;
-            log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
+
+            if ( (msg instanceof Msg.Ping) || (msg instanceof Msg.Pong) ){
+                if (DEBUG)
+                    log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
+            } else {
+                log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
+            }
+
             synchronized (NeuRonNode.this) {
                 resetTimeoutAtCoord(msg.src);
                 if (msg instanceof Msg.Ping) {
@@ -283,7 +295,14 @@ public class NeuRonNode extends Thread {
         public void messageReceived(IoSession session, Object obj)
                 throws Exception {
             Msg msg = (Msg) obj;
-            log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
+
+            if ( (msg instanceof Msg.Ping) || (msg instanceof Msg.Pong) ){
+                if (DEBUG)
+                    log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
+            } else {
+                log("got " + msg.getClass().getSimpleName() + " from " + msg.src);
+            }
+
             synchronized (NeuRonNode.this) {
                 /*
                  * TODO Add something similar to resetTimeout here, but rather
@@ -299,7 +318,7 @@ public class NeuRonNode extends Thread {
                         updateMembers(((Msg.Membership) msg).members);
                     } else {
                         // i am out of date - request latest membership
-                        sendObject(new Msg.MemberPoll(), 0);
+                        sendObject(new Msg.MemberPoll(), 0, DUMP);
                     }
                 }
                 else if (msg.version == currentStateVersion) {
@@ -316,7 +335,7 @@ public class NeuRonNode extends Thread {
                         Msg.Pong pong = new Msg.Pong();
                         pong.ping_time = ping.time;
                         pong.pong_time = System.currentTimeMillis();
-                        sendObject(pong, ping.info.id);
+                        sendObject(pong, ping.info.id, DEBUG);
                     } else if (msg instanceof Msg.Pong) {
                         Msg.Pong pong = (Msg.Pong) msg;
                         long currTime = System.currentTimeMillis();
@@ -434,7 +453,7 @@ public class NeuRonNode extends Thread {
     private void sendMembership(int nid) {
         Msg.Membership msg = new Msg.Membership();
         msg.members = new ArrayList<NodeInfo>(nodes.values());
-        sendObject(msg, nid);
+        sendObject(msg, nid, DUMP);
     }
 
     /**
@@ -544,7 +563,7 @@ public class NeuRonNode extends Thread {
                                         for (int j = 0; j < numCols; j++) {
                                             if ( (grid[i][j].id != iNodeId) && (grid[i][j].bAlive == true) ) {
                                                 Msg.PeeringRequest pr = new Msg.PeeringRequest();
-                                                sendObject(pr, grid[i][j].id);
+                                                sendObject(pr, grid[i][j].id, DUMP);
                                                 neighborSet.add(grid[i][j]);
                                                 break;
                                             }
@@ -675,20 +694,22 @@ public class NeuRonNode extends Thread {
             Msg.RoutingRecs msg = new Msg.RoutingRecs();
             msg.recs = recs;
             recordOverhead(msg);
-            sendObject(msg, src.id);
+            sendObject(msg, src.id, DUMP);
         }
     }
 
     private NodeInfo coordNode = new NodeInfo();
 
-    private void sendObject(final Msg o, int nid) {
+    private void sendObject(final Msg o, int nid, boolean log_flag) {
         if (nid != iNodeId) {
             NodeInfo node = nid == 0 ? coordNode : nodes.get(nid);
-            log("sending " + o.getClass().getSimpleName() + " to " + nid
-                    + " living at " + node.addr + ":" + node.port);
+            if (log_flag) {
+                log("sending " + o.getClass().getSimpleName() + " to " + nid
+                        + " living at " + node.addr + ":" + node.port +
+                        ". (version = " + currentStateVersion + ")");
+            }
             o.src = iNodeId;
             o.version = currentStateVersion;
-            log("currVersion = " + currentStateVersion);
             new DatagramConnector().connect(new InetSocketAddress(node.addr, node.port),
                                             new IoHandlerAdapter() {
                 @Override
@@ -706,7 +727,7 @@ public class NeuRonNode extends Thread {
         HashSet<GridNode> nl = getNeighborList();
         for (GridNode neighbor : nl) {
             recordOverhead(rm);
-            sendObject(rm, neighbor.id);
+            sendObject(rm, neighbor.id, DUMP);
         }
     }
 
