@@ -787,15 +787,12 @@ class GridNode {
 
     public boolean equals(Object other)
     {
-        if (other != null && getClass() ==
-                       other.getClass())
-       {  Item otherItem = (Item)other;
-          return description.equals(
-                    otherItem.description)
-              && partNumber ==
-                   otherItem.partNumber;
-       }
-       else
+        if (other != null && getClass() == other.getClass())
+        {
+            GridNode otherItem = (GridNode)other;
+            return (otherItem.id == this.id) && (otherItem.bAlive == this.bAlive);
+        }
+        else
           return false;
     }
 }
