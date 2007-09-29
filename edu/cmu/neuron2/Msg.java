@@ -82,8 +82,7 @@ public class Msg implements Serializable {
     }
 
     public static final class Pong extends Msg {
-        public long ping_time;
-        public long pong_time;
+        public long time;
     }
 
     public static final class Measurements extends Msg {
