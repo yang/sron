@@ -151,11 +151,11 @@ public class NeuRonNode extends Thread {
     private void log(String msg) {
         logger.info(msg);
     }
-    
+
     private void warn(String msg) {
         logger.warning(msg);
     }
-    
+
     private void err(String msg) {
         logger.severe(msg);
     }
@@ -166,10 +166,10 @@ public class NeuRonNode extends Thread {
         ex.printStackTrace(p);
         err(s.toString());
     }
-    
+
     /**
      * Used for logging data, such as neighbor lists.
-     * 
+     *
      * @param name - the name of the data, e.g.: "neighbors", "info"
      * @param value
      */
@@ -301,7 +301,9 @@ public class NeuRonNode extends Thread {
                         synchronized (NeuRonNode.this) {
                             try {
                                 broadcastMeasurements();
-                                broadcastRecommendations();
+                                if (scheme != RoutingScheme.SIMPLE) {
+                                    broadcastRecommendations();
+                                }
                             } catch (Exception ex) {
                                 // failure-oblivious: swallow any exceptions and
                                 // just try resuming
@@ -315,14 +317,14 @@ public class NeuRonNode extends Thread {
             }
         }
     }
-    
+
     private final HashSet<Integer> ignored = new HashSet<Integer>();
-    
+
     public synchronized void ignore(int nid) {
         log("ignoring " + nid);
         ignored.add(nid);
     }
-    
+
     public synchronized void unignore(int nid) {
         log("unignoring " + nid);
         ignored.remove(nid);
@@ -449,7 +451,7 @@ public class NeuRonNode extends Thread {
 
     /**
      * a coord-only method
-     * 
+     *
      * @param nid
      */
     private void resetTimeoutAtCoord(final int nid) {
@@ -621,7 +623,7 @@ public class NeuRonNode extends Thread {
         overflowNeighbors.clear();
         // repopulateNeighborList();
     }
-    
+
     private static enum RoutingScheme { SIMPLE, SQRT };
     private final RoutingScheme scheme;
 
@@ -629,11 +631,11 @@ public class NeuRonNode extends Thread {
         HashSet<GridNode> neighborSet = new HashSet<GridNode>();
         for (int r = 0; r < numRows; r++) {
             for (int c = 0; c < numCols; c++) {
-            	
+
                 // this can happen at most twice
-            	if (scheme == RoutingScheme.SIMPLE) {
-            		neighborSet.add(grid[r][c]);
-            	} else if (grid[r][c].id == myNid) {
+                if (scheme == RoutingScheme.SIMPLE) {
+                    neighborSet.add(grid[r][c]);
+                } else if (grid[r][c].id == myNid) {
                     // all the nodes in row i, and all the nodes in column j are
                     // belong to us :)
 
@@ -676,11 +678,11 @@ public class NeuRonNode extends Thread {
     }
 
     /**
-	 * expands the probes table to reflect changes in the new membership view.
-	 * assumes that "nodes" has been updated with the new membership. copies
-	 * over probe info from previous table for the nodes that are common across
-	 * the two membership views.
-	 */
+     * expands the probes table to reflect changes in the new membership view.
+     * assumes that "nodes" has been updated with the new membership. copies
+     * over probe info from previous table for the nodes that are common across
+     * the two membership views.
+     */
     private void repopulateProbeTable(List<Integer> oldNids) {
         long newProbeTable[][] = new long[nodes.size()][nodes.size()];
 
@@ -704,7 +706,7 @@ public class NeuRonNode extends Thread {
                 }
             }
         }
-        
+
         probeTable = newProbeTable; // forget about the old one.
 
         // for testing
@@ -808,7 +810,7 @@ public class NeuRonNode extends Thread {
                     ", version = " + currentStateVersion);
             o.src = myNid;
             o.version = currentStateVersion;
-            
+
             try {
                 /*
                  * note that it's unsafe to re-use these output streams - at
