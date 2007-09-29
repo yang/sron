@@ -114,7 +114,7 @@ public class NeuRonNode extends Thread {
         if (bCoordinator) {
             try {
                 int nextNodeId = 1;
-                Thread.sleep(2000);
+                //Thread.sleep(2000);
                 new DatagramAcceptor().bind(new InetSocketAddress(InetAddress.getLocalHost(), basePort),
                                             new CoordReceiver(), cfg);
                 ServerSocket ss = new ServerSocket(basePort);
@@ -219,16 +219,26 @@ public class NeuRonNode extends Thread {
                 log("server started on " + InetAddress.getLocalHost() + ":" + (basePort + iNodeId));
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
-                        synchronized (NeuRonNode.this) {
-                            pingAll();
+                        try {
+                            synchronized (NeuRonNode.this) {
+                                pingAll();
+                            }
+                        }
+                        catch (Exception ex) {
+                            ex.printStackTrace();
                         }
                     }
                 }, 1, PING_INTERVAL_IN_SEC, TimeUnit.SECONDS);
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
-                        synchronized (NeuRonNode.this) {
-                            broadcastMeasurements();
-                            broadcastRecommendations();
+                        try {
+                            synchronized (NeuRonNode.this) {
+                                broadcastMeasurements();
+                                broadcastRecommendations();
+                            }
+                        }
+                        catch (Exception ex) {
+                            ex.printStackTrace();
                         }
                     }
                 }, 1, ADJ_AND_RECO_INTERVAL_IN_SEC, TimeUnit.SECONDS);
@@ -330,6 +340,7 @@ public class NeuRonNode extends Thread {
                     } else if (msg instanceof Msg.RoutingRecs) {
                         log(((Msg.RoutingRecs) msg).toString());
                         handleRecommendation(((Msg.RoutingRecs) msg).recs);
+                        log(toStringNextHopTable());
                     } else if (msg instanceof Msg.Ping) {
                         Msg.Ping ping = ((Msg.Ping) msg);
                         Msg.Pong pong = new Msg.Pong();
@@ -681,6 +692,16 @@ public class NeuRonNode extends Thread {
         return s;
     }
 
+    private String toStringNextHopTable() {
+        String s = new String("Next-hop table for " + iNodeId
+                + " = [");
+        for (Integer node : nextHopTable.keySet()) {
+            s += node + " -> " + nextHopTable.get(node) + "; ";
+        }
+        s += "]";
+        return s;
+    }
+
     private void printGrid() {
         String s = new String("Grid for Node " + iNodeId + ".\n");
         if (grid != null) {
@@ -704,16 +725,19 @@ public class NeuRonNode extends Thread {
         nl.addAll(overflowNeighbors);
         overflowNeighbors.clear();
         log("Sending recommendations to neighbors. " + toStringNeighborList());
+        ArrayList<Integer> sortedNids = memberNids();
         for (GridNode src : nl) {
+            int srcOffset = sortedNids.indexOf(src.id);
             ArrayList<Msg.RoutingRecs.Rec> recs = new ArrayList<Msg.RoutingRecs.Rec>();
             long min = Long.MAX_VALUE;
             int mini = -1;
             for (GridNode dst : nl) {
+                int dstOffset = sortedNids.indexOf(dst.id);
                 if (src.id != dst.id) {
-                    for (int i = 0; i < probeTable[src.id].length; i++) {
+                    for (int i = 0; i < probeTable[srcOffset].length; i++) {
                         // we assume bi-directional links for the time being
                         // i.e. link from a-> b is the same as b -> a
-                        long cur = probeTable[src.id][i] + probeTable[dst.id][i];
+                        long cur = probeTable[srcOffset][i] + probeTable[dstOffset][i];
                         if (cur < min) {
                             min = cur;
                             mini = i;
@@ -756,7 +780,7 @@ public class NeuRonNode extends Thread {
         rm.membershipList = memberNids();
         rm.probeTable = probeTable[rm.membershipList.indexOf(iNodeId)].clone();
         HashSet<GridNode> nl = getNeighborList();
-        log("Sending mesurements to neighbors. " + toStringNeighborList());
+        log("Sending measurements to neighbors. " + toStringNeighborList());
         for (GridNode neighbor : nl) {
             recordOverhead(rm);
             sendObject(rm, neighbor.id, DUMP);
@@ -810,7 +834,7 @@ public class NeuRonNode extends Thread {
         this.doQuit = true;
         synchronized (NeuRonNode.this) {
             endTime = System.currentTimeMillis();
-            long deltaInSec = (endTime - startTime) * 1000;
+            long deltaInSec = (endTime - startTime) / 1000;
             routingBandwidth = routingOverheadInBytes / deltaInSec;
         }
         log("Routing Bandwidth = " + routingBandwidth);

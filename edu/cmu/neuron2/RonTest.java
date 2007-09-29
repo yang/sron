@@ -60,12 +60,22 @@ public class RonTest {
             switch (mode) {
             case SIM:
                 for (int i = 0; i <= iNumNodes; i++) {
+
                     NeuRonNode node = new NeuRonNode(i,
                             sCoOrdinatorServerName,
                             iCoOrdinatorServerPort,
                             executor, scheduler);
                     node.start();
                     nodes.add(node);
+
+/*
+                    try {
+                        Thread.sleep(1000);
+                    }
+                    catch (InterruptedException ie) {
+
+                    }
+*/
                 }
                 break;
             case DIST:
