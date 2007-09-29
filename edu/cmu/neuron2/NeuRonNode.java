@@ -1,5 +1,6 @@
 package edu.cmu.neuron2;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -32,14 +33,12 @@ import java.util.logging.Formatter;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import org.apache.mina.common.ByteBuffer;
 import org.apache.mina.common.IoHandlerAdapter;
 import org.apache.mina.common.IoServiceConfig;
 import org.apache.mina.common.IoSession;
-import org.apache.mina.filter.codec.ProtocolCodecFilter;
-import org.apache.mina.filter.codec.serialization.ObjectSerializationCodecFactory;
 import org.apache.mina.transport.socket.nio.DatagramAcceptor;
 import org.apache.mina.transport.socket.nio.DatagramAcceptorConfig;
-import org.apache.mina.transport.socket.nio.DatagramConnector;
 
 import edu.cmu.neuron2.Msg.RoutingRecs.Rec;
 
@@ -78,10 +77,9 @@ public class NeuRonNode extends Thread {
     private NodeInfo coordNode = new NodeInfo();
     private DatagramSocket sendSocket;
 
-    public NeuRonNode(int id, String cName, int cPort, ExecutorService executor, ScheduledExecutorService scheduler, Properties props) {
+    public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler, Properties props) {
         myNid = id;
-        coordinatorHost = cName;
-        basePort = cPort;
+        basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         coordNode.id = 0;
         currentStateVersion = 0;
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "10"));
@@ -97,12 +95,13 @@ public class NeuRonNode extends Thread {
                 return buf.toString();
             }
         };
-        Logger.getLogger("").getHandlers()[0].setFormatter(fmt);
+        Logger rootLogger = Logger.getLogger("");
+        rootLogger.getHandlers()[0].setFormatter(fmt);
         logger = Logger.getLogger("node" + myNid);
         if (props.getProperty("logfilter") != null) {
             String[] labels = props.getProperty("logfilter").split(" ");
             final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
-            Logger.getLogger("").getHandlers()[0].setFilter(new Filter() {
+            rootLogger.getHandlers()[0].setFilter(new Filter() {
                 public boolean isLoggable(LogRecord record) {
                     String[] parts = record.getLoggerName().split("\\.", 2);
                     return parts.length == 1
@@ -112,7 +111,8 @@ public class NeuRonNode extends Thread {
         }
 
         try {
-            FileHandler fh = new FileHandler("%t/scaleron-log-" + myNid);
+            String logFileBase = props.getProperty("logFileBase", "%t/scaleron-log-");
+            FileHandler fh = new FileHandler(logFileBase + myNid);
             fh.setFormatter(fmt);
             logger.addHandler(fh);
 
@@ -121,6 +121,8 @@ public class NeuRonNode extends Thread {
             throw new RuntimeException(ex);
         }
         try {
+            coordinatorHost = props.getProperty("coordinatorHost",
+                    InetAddress.getLocalHost().getHostAddress());
             coordNode.addr = InetAddress.getByName(coordinatorHost);
         } catch (UnknownHostException ex) {
             throw new RuntimeException(ex);
@@ -344,10 +346,17 @@ public class NeuRonNode extends Thread {
         */
         sendObject(ping, 0);
     }
-    
+
     private Msg deserialize(Object o) {
-        log(o.toString());
-        return null;
+        ByteBuffer buf = (ByteBuffer) o;
+        byte[] bytes = new byte[buf.limit()];
+        buf.get(bytes);
+        try {
+            return (Msg) new ObjectInputStream(new ByteArrayInputStream(
+                    bytes)).readObject();
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
     }
 
     /**
@@ -796,17 +805,16 @@ public class NeuRonNode extends Thread {
             o.version = currentStateVersion;
             
             try {
-                oos.reset();
-                baos.reset();
+                /*
+                 * note that it's unsafe to re-use these output streams - at
+                 * least, i don't know how (reset() is insufficient)
+                 */
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ObjectOutputStream oos = new ObjectOutputStream(baos);
                 oos.writeObject(o);
                 byte[] buf = baos.toByteArray();
-//                oos.reset();
-//                baos.reset();
-//                baos.write(payload)
-//                byte[] header;
-                
-                sendSocket.send(new DatagramPacket(buf, buf.length));
-            } catch (IOException ex) {
+                sendSocket.send(new DatagramPacket(buf, buf.length, node.addr, node.port));
+            } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
 //            new DatagramConnector().connect(new InetSocketAddress(node.addr, node.port),
