@@ -322,13 +322,13 @@ public class NeuRonNode extends Thread {
                     }
                 }
                 else if (msg.version == currentStateVersion) {
-                    // all msgs go though the same processing loop
-                    //   (but we can live that that for now)
                     if (msg instanceof Msg.Membership) {
                         updateMembers(((Msg.Membership) msg).members);
                     } else if (msg instanceof Msg.Measurements) {
+                        log(((Msg.Measurements) msg).toString());
                         updateNetworkState((Msg.Measurements) msg);
                     } else if (msg instanceof Msg.RoutingRecs) {
+                        log(((Msg.RoutingRecs) msg).toString());
                         handleRecommendation(((Msg.RoutingRecs) msg).recs);
                     } else if (msg instanceof Msg.Ping) {
                         Msg.Ping ping = ((Msg.Ping) msg);
@@ -395,6 +395,13 @@ public class NeuRonNode extends Thread {
             ScheduledFuture<?> oldFuture = timeouts.get(nid);
             if (oldFuture != null) {
                 oldFuture.cancel(false);
+            }
+            for (int i = 0; i < numRows; i++) {
+                for (int j = 0; j < numCols; j++) {
+                    if (grid[i][j].id == nid) {
+                        grid[i][j].bAlive = true;
+                    }
+                }
             }
             ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
                 public void run() {
@@ -469,6 +476,7 @@ public class NeuRonNode extends Thread {
     }
 
     private void updateMembers(List<NodeInfo> newNodes) {
+        List<Integer> oldNids = memberNids();
         nodes.clear();
 
         for (NodeInfo node : newNodes) {
@@ -504,10 +512,10 @@ public class NeuRonNode extends Thread {
 
         // TODO :: we lose previous measurements - need to fix this
         // repopulateProbeTable() currently fills in random values
-        probeTable = new long[nodes.size()][nodes.size()];
         repopulateGrid();
+        repopulateProbeTable(oldNids);
         printGrid();
-        printNeighborList();
+        log(toStringNeighborList());
     }
 
     /**
@@ -533,7 +541,6 @@ public class NeuRonNode extends Thread {
         }
         overflowNeighbors.clear();
         // repopulateNeighborList();
-        repopulateProbeTable();
     }
 
     private synchronized HashSet<GridNode> getNeighborList() {
@@ -609,15 +616,39 @@ public class NeuRonNode extends Thread {
     }
     */
 
-    private void repopulateProbeTable() {
+    /*
+     * expands the probes table to reflect changes in the new membership view
+     * assumes that "nodes" has been updated with the new membership
+     * copies over probe info from previous table for the nodes that are common across the two membership views
+     */
+    private void repopulateProbeTable(List<Integer> oldNids) {
+        long newProbeTable[][] = new long[nodes.size()][nodes.size()];
+
         int nodeIndex = memberNids().indexOf(iNodeId);
         for (int i = 0; i < memberNids().size(); i++) {
             if (i == nodeIndex) {
-                probeTable[i][i] = 0;
+                newProbeTable[i][i] = 0;
             } else {
-                probeTable[nodeIndex][i] = generator.nextInt();
+                //newProbeTable[nodeIndex][i] = generator.nextInt();
+                newProbeTable[nodeIndex][i] = Integer.MAX_VALUE;
             }
         }
+
+        // copy over old probe data.
+        for (int i = 0; i < oldNids.size(); i++) {
+            int node_index = memberNids().indexOf(oldNids.get(i));
+            if (node_index != -1) {
+                for (int j = 0; j < oldNids.size(); j++) {
+                    int node_index_2 = memberNids().indexOf(oldNids.get(j));
+                    if (node_index_2 != -1)
+                        newProbeTable[node_index][node_index_2] = probeTable[i][j];
+                }
+            }
+
+        }
+
+        probeTable = newProbeTable; // forget about the old one.
+
 
         // for testing
         if (nodeIndex == 0) {
@@ -629,26 +660,25 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private void printMembership() {
+    private String toStingMembership() {
         String s = new String("Membership for Node " + iNodeId
                 + ". Membership = [");
         for (Integer memberId : memberNids()) {
             s += memberId + ", ";
         }
         s += "]";
-        log(s);
+        return s;
     }
 
-    private void printNeighborList() {
+    private String toStringNeighborList() {
         String s = new String("Neighbors for Node " + iNodeId
                 + ". Neighbors = [");
         HashSet<GridNode> nl = getNeighborList();
-        // YYY for (int neighborId : neighbors) {
         for (GridNode neighbor : nl) {
             s += neighbor.id + ", ";
         }
         s += "]";
-        log(s);
+        return s;
     }
 
     private void printGrid() {
@@ -673,6 +703,7 @@ public class NeuRonNode extends Thread {
         HashSet<GridNode> nl = getNeighborList();
         nl.addAll(overflowNeighbors);
         overflowNeighbors.clear();
+        log("Sending recommendations to neighbors. " + toStringNeighborList());
         for (GridNode src : nl) {
             ArrayList<Msg.RoutingRecs.Rec> recs = new ArrayList<Msg.RoutingRecs.Rec>();
             long min = Long.MAX_VALUE;
@@ -725,6 +756,7 @@ public class NeuRonNode extends Thread {
         rm.membershipList = memberNids();
         rm.probeTable = probeTable[rm.membershipList.indexOf(iNodeId)].clone();
         HashSet<GridNode> nl = getNeighborList();
+        log("Sending mesurements to neighbors. " + toStringNeighborList());
         for (GridNode neighbor : nl) {
             recordOverhead(rm);
             sendObject(rm, neighbor.id, DUMP);

@@ -55,6 +55,18 @@ public class Msg implements Serializable {
         }
 
         public ArrayList<Rec> recs;
+
+        public String toString() {
+            String s = new String("Routing Recommendation Msg (" + version +
+                                  ") from Node " + src + ". Msg = [");
+            for (int i = 0; i < recs.size(); i++) {
+                s += recs.get(i).dst + ": " + recs.get(i).via;
+                if (i < (recs.size() -1))
+                    s += "; ";
+            }
+            s += "]";
+            return s;
+        }
     }
 
     public static final class Ping extends Msg {
@@ -77,6 +89,18 @@ public class Msg implements Serializable {
     public static final class Measurements extends Msg {
         public ArrayList<Integer> membershipList;
         public long[] probeTable;
+
+        public String toString() {
+            String s = new String("Mesurement Msg (" + version +
+                                  ") from Node " + src + ". Msg = [");
+            for (int i = 0; i < membershipList.size(); i++) {
+                s += membershipList.get(i) + ": " + probeTable[i];
+                if (i < (membershipList.size() -1))
+                    s += "; ";
+            }
+            s += "]";
+            return s;
+        }
     }
 
     public static final class MemberPoll extends Msg {
