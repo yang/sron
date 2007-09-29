@@ -85,6 +85,7 @@ public class NeuRonNode extends Thread {
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "10"));
         probePeriod = Integer.parseInt(props.getProperty("probePeriod", "5"));
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 5));
+        scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
         Formatter fmt = new Formatter() {
             public String format(LogRecord record) {
                 StringBuffer buf = new StringBuffer();
@@ -620,14 +621,19 @@ public class NeuRonNode extends Thread {
         overflowNeighbors.clear();
         // repopulateNeighborList();
     }
+    
+    private static enum RoutingScheme { SIMPLE, SQRT };
+    private final RoutingScheme scheme;
 
     private HashSet<GridNode> getNeighborList() {
         HashSet<GridNode> neighborSet = new HashSet<GridNode>();
         for (int r = 0; r < numRows; r++) {
             for (int c = 0; c < numCols; c++) {
-
+            	
                 // this can happen at most twice
-                if (grid[r][c].id == myNid) {
+            	if (scheme == RoutingScheme.SIMPLE) {
+            		neighborSet.add(grid[r][c]);
+            	} else if (grid[r][c].id == myNid) {
                     // all the nodes in row i, and all the nodes in column j are
                     // belong to us :)
 
@@ -669,11 +675,12 @@ public class NeuRonNode extends Thread {
         return neighborSet;
     }
 
-    /*
-     * expands the probes table to reflect changes in the new membership view
-     * assumes that "nodes" has been updated with the new membership
-     * copies over probe info from previous table for the nodes that are common across the two membership views
-     */
+    /**
+	 * expands the probes table to reflect changes in the new membership view.
+	 * assumes that "nodes" has been updated with the new membership. copies
+	 * over probe info from previous table for the nodes that are common across
+	 * the two membership views.
+	 */
     private void repopulateProbeTable(List<Integer> oldNids) {
         long newProbeTable[][] = new long[nodes.size()][nodes.size()];
 
@@ -696,11 +703,9 @@ public class NeuRonNode extends Thread {
                         newProbeTable[node_index][node_index_2] = probeTable[i][j];
                 }
             }
-
         }
-
+        
         probeTable = newProbeTable; // forget about the old one.
-
 
         // for testing
         if (nodeIndex == 0) {
