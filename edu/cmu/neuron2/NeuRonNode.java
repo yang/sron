@@ -1026,20 +1026,21 @@ public class NeuRonNode extends Thread {
         try {
             // TODO what a retarded way to record size - need custom serialization!
             oos.writeObject(m);
-            routingOverheadInBytes += baos.size();
+            double size = baos.size();
+            routingOverheadInBytes += size;
             baos.reset();
 
             if (myNid != 0) {
                 endTime = System.currentTimeMillis();
                 long deltaInSec = (endTime - startTime) / 1000;
                 routingBandwidth = routingOverheadInBytes / deltaInSec;
-                log("Routing Bandwidth = " + routingBandwidth + "Bytes/sec");
+                log("current msg overhead = " + size + " Bytes");
+                log("Routing Bandwidth = " + routingBandwidth + " Bytes/sec");
             }
 
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
-
     }
 
     public double quit() {
@@ -1050,7 +1051,7 @@ public class NeuRonNode extends Thread {
             routingBandwidth = routingOverheadInBytes / deltaInSec;
         }
         if (myNid != 0) {
-            log("Routing Bandwidth = " + routingBandwidth);
+            log("Routing Bandwidth = " + routingBandwidth + " Bytes/sec");
         }
         return routingBandwidth;
     }

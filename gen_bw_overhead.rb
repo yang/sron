@@ -13,7 +13,7 @@ for runtype in ["SIMPLE", "SQRT", "SQRT_SPECIAL"]
         sub_dir = "#{runtype}/#{numNodes}"
 
         #system("for file in $(ls #{DATA_DUMP_DIR}/#{sub_dir}/scaleron-log-*); do grep -i \"bandwidth\" $file | tail -n1; done | awk '{print $14}' | ~/tools/UnixStat/bin/stats min max mean");
-        num_avg = `for file in $(ls #{DATA_DUMP_DIR}/#{sub_dir}/scaleron-log-*); do grep -i \"bandwidth\" $file | tail -n1; done | awk '{print $14}' | ./UnixStat/bin/stats mean`
+        num_avg = `for file in $(ls #{DATA_DUMP_DIR}/#{sub_dir}/scaleron-log-*); do grep -i \"bandwidth\" $file | tail -n1; done | awk '{print $14}' | ../tools/UnixStat/bin/stats mean`
         out.puts "#{numNodes} #{num_avg}"
     end
     out.close
