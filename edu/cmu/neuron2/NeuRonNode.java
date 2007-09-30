@@ -677,6 +677,18 @@ public class NeuRonNode extends Thread {
         return neighborSet;
     }
 
+    private HashSet<GridNode> getOtherMembers() {
+        HashSet<GridNode> memberSet = new HashSet<GridNode>();
+        for (int r = 0; r < numRows; r++) {
+            for (int c = 0; c < numCols; c++) {
+                if (grid[r][c].id != myNid) {
+                    memberSet.add(grid[r][c]);
+                }
+            }
+        }
+        return memberSet;
+    }
+
     /**
      * expands the probes table to reflect changes in the new membership view.
      * assumes that "nodes" has been updated with the new membership. copies
@@ -801,6 +813,70 @@ public class NeuRonNode extends Thread {
         }
     }
 
+    /**
+     * for each neighbor, find for him the min-cost hops to *all other nodes* (as opposed to neighbors),
+     * and send this info to him (the intermediate node may be one of the
+     * endpoints, meaning a direct route is cheapest)
+     */
+    private void broadcastRecommendations2() {
+        HashSet<GridNode> nl = getNeighborList();
+        nl.addAll(overflowNeighbors);
+        overflowNeighbors.clear();
+        log("Sending recommendations to neighbors. " + toStringNeighborList());
+        ArrayList<Integer> sortedNids = memberNids();
+
+        HashSet<GridNode> others = getOtherMembers();
+        others.removeAll(nl);
+
+        for (GridNode src : nl) {
+            int srcOffset = sortedNids.indexOf(src.id);
+            ArrayList<Msg.RoutingRecs.Rec> recs = new ArrayList<Msg.RoutingRecs.Rec>();
+
+            // src = neighbor, dst = neighbor
+            for (GridNode dst : nl) {
+                int dstOffset = sortedNids.indexOf(dst.id);
+                long min = Long.MAX_VALUE;
+                int mini = -1;
+                if (src.id != dst.id) {
+                    for (int i = 0; i < probeTable[srcOffset].length; i++) {
+                        // we assume bi-directional links for the time being
+                        // i.e. link from a-> b is the same as b -> a
+                        long cur = probeTable[srcOffset][i] + probeTable[dstOffset][i];
+                        if (cur < min) {
+                            min = cur;
+                            mini = sortedNids.get(i);
+                        }
+                    }
+                    recs.add(new Msg.RoutingRecs.Rec(dst.id, mini));
+                }
+            }
+
+            // src = neighbor, dst != neighbor
+            for (GridNode dst : others) {
+                int dstOffset = sortedNids.indexOf(dst.id);
+                long min = probeTable[srcOffset][dstOffset];
+                int mini = srcOffset;
+                if (src.id != dst.id) {
+                    for (GridNode neighborHop : nl) {
+                        int neighborHopOffset = sortedNids.indexOf(neighborHop.id);
+                        long curMin = probeTable[srcOffset][neighborHopOffset] + probeTable[neighborHopOffset][dstOffset];
+                        if (curMin < min) {
+                            min = curMin;
+                            mini = neighborHop.id;
+                        }
+                    }
+                    recs.add(new Msg.RoutingRecs.Rec(dst.id, mini));
+                }
+            }
+
+            Msg.RoutingRecs msg = new Msg.RoutingRecs();
+            msg.recs = recs;
+            recordOverhead(msg);
+            sendObject(msg, src.id);
+        }
+    }
+
+
     private void sendObject(final Msg o, int nid) {
         if (nid != myNid) {
             NodeInfo node = nid == 0 ? coordNode : nodes.get(nid);
@@ -879,7 +955,7 @@ public class NeuRonNode extends Thread {
         try {
             // TODO what a retarded way to record size - need custom serialization!
             oos.writeObject(m);
-            routingOverheadInBytes = baos.size();
+            routingOverheadInBytes += baos.size();
             baos.reset();
         } catch (IOException ex) {
             throw new RuntimeException(ex);
@@ -887,7 +963,7 @@ public class NeuRonNode extends Thread {
 
     }
 
-    public void quit() {
+    public double quit() {
         this.doQuit = true;
         synchronized (NeuRonNode.this) {
             endTime = System.currentTimeMillis();
@@ -895,6 +971,7 @@ public class NeuRonNode extends Thread {
             routingBandwidth = routingOverheadInBytes / deltaInSec;
         }
         log("Routing Bandwidth = " + routingBandwidth);
+        return routingBandwidth;
     }
 
 }

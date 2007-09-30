@@ -17,11 +17,23 @@ public class RonTest {
 
     private static enum RunMode { SIM, DIST }
 
+    private int numNodes;
+
     public static void main(String[] args) throws Exception {
-        new RonTest().run();
+
+        RonTest rt = new RonTest();
+        if (args.length != 1) {
+            System.out.println("Usage: java RonTest numNodes");
+            System.exit(0);
+        } else {
+            rt.numNodes = Integer.parseInt(args[0]);
+        }
+
+        rt.run();
     }
 
     public void run() throws Exception {
+
         Properties props = System.getProperties();
         String config = System.getProperty("neuron.config");
         if (config != null) {
@@ -31,12 +43,13 @@ public class RonTest {
         final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
         Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
+                double routingBandwidth = 0;
                 for (NeuRonNode node : nodes) {
-                    node.quit();
+                    routingBandwidth += node.quit();
                 }
             }
         });
-        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
+        //int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
         int nodeId = Integer.parseInt(props.getProperty("nodeId", "0"));
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         String simData = props.getProperty("simData", "");
@@ -62,7 +75,7 @@ public class RonTest {
             break;
         }
     }
-    
+
     private void sim(String datafile, final List<NeuRonNode> nodes,
         ScheduledExecutorService scheduler) throws IOException {
         if (!datafile.equals("")) {
