@@ -34,3 +34,6 @@ clean:$(LOCAL_CLASS_DIR)
 
 test:
 	CLASSPATH=$(CLASS_DIR) $(JAVA) edu.cmu.nuron.RonTest 4 localhost 8100 false
+
+jar:
+	find edu/cmu/neuron2 -name '*.class' | xargs jar cf scaleron.jar
