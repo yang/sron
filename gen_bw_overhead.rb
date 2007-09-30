@@ -25,7 +25,7 @@ out2 = File.new("graph_neuron_bw_overhead_comparison.gp", "w")
 
 out2.puts "set terminal postscript pdf monochrome;"
 out2.puts "set size 0.65"
-out2.puts "set output '#{GRAPH_DIR}/_graph_neuron_bw_overhead_comparison.eps';"
+out2.puts "set output '#{GRAPH_DIR}/_graph_neuron_bw_overhead_comparison.pdf';"
 out2.puts "set title \"Comparison of routing bandwidth overhead\";"
 out2.puts "set xlabel \"number of nodes\"; set ylabel \"routing bandwidth overhead (bytes/sec)\";"
 str = "plot "
