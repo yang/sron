@@ -26,6 +26,7 @@ import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.FileHandler;
 import java.util.logging.Filter;
@@ -41,6 +42,7 @@ import org.apache.mina.transport.socket.nio.DatagramAcceptor;
 import org.apache.mina.transport.socket.nio.DatagramAcceptorConfig;
 
 import edu.cmu.neuron2.Msg.RoutingRecs.Rec;
+import edu.cmu.neuron2.RonTest.RunMode;
 
 public class NeuRonNode extends Thread {
     private final ExecutorService executor;
@@ -77,15 +79,23 @@ public class NeuRonNode extends Thread {
     private NodeInfo coordNode = new NodeInfo();
     private DatagramSocket sendSocket;
 
-    public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler, Properties props) {
+    private RunMode mode;
+    private final int numNodesHint;
+    private Semaphore semAllJoined;
+
+    public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler,
+                        Properties props, int num_nodes_hint, Semaphore sem_all_joined) {
         myNid = id;
-        basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         coordNode.id = 0;
         currentStateVersion = 0;
+
+        basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
+        mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "10"));
         probePeriod = Integer.parseInt(props.getProperty("probePeriod", "5"));
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 5));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
+
         Formatter fmt = new Formatter() {
             public String format(LogRecord record) {
                 StringBuffer buf = new StringBuffer();
@@ -146,6 +156,9 @@ public class NeuRonNode extends Thread {
         } catch (IOException ioe) {
             throw new RuntimeException(ioe);
         }
+
+        numNodesHint = num_nodes_hint;
+        semAllJoined = sem_all_joined;
     }
 
     private void log(String msg) {
@@ -192,6 +205,8 @@ public class NeuRonNode extends Thread {
                     ss.setReuseAddress(true);
                     ss.setSoTimeout(1000);
                     log("Beep!");
+
+                    final Hashtable<Integer, Socket> incomingSocks = new Hashtable<Integer, Socket>();
                     while (!doQuit) {
                         final Socket incoming;
                         try {
@@ -200,31 +215,70 @@ public class NeuRonNode extends Thread {
                             continue;
                         }
                         final int nodeId = nextNodeId++;
-                        resetTimeoutAtCoord(nodeId);
-                        executor.submit(new Runnable() {
-                            public void run() {
-                                try {
-                                    Msg.Join msg = (Msg.Join) new ObjectInputStream(incoming.getInputStream())
-                                                                    .readObject();
+
+                        if (mode == RunMode.SIM) {
+                            incomingSocks.put(nodeId, incoming);
+                            executor.submit(new Runnable() {
+                                public void run() {
                                     try {
-                                        Msg.Init im = new Msg.Init();
-                                        im.id = nodeId;
+                                        Msg.Join msg = (Msg.Join) new ObjectInputStream(incoming.getInputStream())
+                                                                        .readObject();
+
                                         synchronized (NeuRonNode.this) {
-                                            addMember(nodeId, msg.addr,
-                                                      basePort + nodeId);
-                                            im.version = currentStateVersion;
-                                            im.members = new ArrayList<NodeInfo>(nodes.values());
+                                            addMemberWithoutBroadcast(nodeId, msg.addr, basePort + nodeId);
+                                            if (nodes.size() == numNodesHint) {
+                                                // time to broadcast ims to everyone
+                                                ArrayList<NodeInfo> memberList = new ArrayList<NodeInfo>(nodes.values());
+                                                for (NodeInfo member : memberList) {
+                                                    resetTimeoutAtCoord(member.id);
+                                                    try {
+                                                        Msg.Init im = new Msg.Init();
+                                                        im.id = member.id;
+                                                        im.version = currentStateVersion;
+                                                        im.members = memberList;
+                                                        new ObjectOutputStream(incomingSocks.get(member.id).getOutputStream())
+                                                                .writeObject(im);
+                                                    } finally {
+                                                        incomingSocks.get(member.id).close();
+                                                    }
+                                                }
+                                                semAllJoined.release();
+                                            }
                                         }
-                                        new ObjectOutputStream(incoming.getOutputStream())
-                                                .writeObject(im);
-                                    } finally {
-                                        incoming.close();
+                                    }  catch (Exception ex) {
+                                        throw new RuntimeException(ex);
                                     }
-                                } catch (Exception ex) {
-                                    throw new RuntimeException(ex);
                                 }
-                            }
-                        });
+                            });
+                        }
+                        else {
+                            resetTimeoutAtCoord(nodeId);
+                            executor.submit(new Runnable() {
+                                public void run() {
+                                    try {
+                                        Msg.Join msg = (Msg.Join) new ObjectInputStream(incoming.getInputStream())
+                                                                        .readObject();
+                                        try {
+                                            Msg.Init im = new Msg.Init();
+                                            im.id = nodeId;
+                                            synchronized (NeuRonNode.this) {
+                                                addMember(nodeId, msg.addr,
+                                                          basePort + nodeId);
+                                                im.version = currentStateVersion;
+                                                im.members = new ArrayList<NodeInfo>(nodes.values());
+                                            }
+                                            new ObjectOutputStream(incoming.getOutputStream())
+                                                    .writeObject(im);
+                                        } finally {
+                                            incoming.close();
+                                        }
+                                    } catch (Exception ex) {
+                                        throw new RuntimeException(ex);
+                                    }
+                                }
+                            });
+                        }
+
                     }
                 } finally {
                     ss.close();
@@ -256,9 +310,9 @@ public class NeuRonNode extends Thread {
                     log("sending join");
                     Msg.Join msg = new Msg.Join();
                     msg.addr = InetAddress.getLocalHost();
-                    new ObjectOutputStream(s.getOutputStream())
-                            .writeObject(msg);
+                    new ObjectOutputStream(s.getOutputStream()).writeObject(msg);
 
+                    log("waiting for InitMsg");
                     Msg.Init im = (Msg.Init) new ObjectInputStream(s.getInputStream()).readObject();
                     assert im.id > 0;
                     myNid = im.id;
@@ -519,6 +573,19 @@ public class NeuRonNode extends Thread {
         nodes.put(newNid, info);
         currentStateVersion++;
         broadcastMembershipChange(newNid);
+    }
+
+    /**
+     * a coordinator-only method - for init in simulation only
+     */
+    private void addMemberWithoutBroadcast(int newNid, InetAddress addr, int port) {
+        log("adding new node: " + newNid);
+        NodeInfo info = new NodeInfo();
+        info.id = newNid;
+        info.addr = addr;
+        info.port = port;
+        nodes.put(newNid, info);
+        currentStateVersion++;
     }
 
     private ArrayList<Integer> memberNids() {

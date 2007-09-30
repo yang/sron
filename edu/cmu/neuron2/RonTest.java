@@ -11,24 +11,32 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 public class RonTest {
 
-    private static enum RunMode { SIM, DIST }
+    public static enum RunMode { SIM, DIST }
 
     private int numNodes;
+    private Semaphore semAllJoined;
+
+    public RonTest(int num_nodes) {
+        numNodes = num_nodes;
+        semAllJoined = new Semaphore(0);
+    }
 
     public static void main(String[] args) throws Exception {
 
-        RonTest rt = new RonTest();
+        int num_nodes = 0;
         if (args.length != 1) {
             System.out.println("Usage: java RonTest numNodes");
             System.exit(0);
         } else {
-            rt.numNodes = Integer.parseInt(args[0]);
+            num_nodes = Integer.parseInt(args[0]);
         }
 
+        RonTest rt = new RonTest(num_nodes);
         rt.run();
     }
 
@@ -61,16 +69,18 @@ public class RonTest {
         switch (mode) {
         case SIM:
             for (int i = 0; i <= numNodes; i++) {
-                NeuRonNode node = new NeuRonNode(i,
-                        executor, scheduler, props);
+                NeuRonNode node = new NeuRonNode(i, executor, scheduler,
+                                                props, numNodes, semAllJoined);
                 node.start();
                 nodes.add(node);
             }
+            semAllJoined.acquire();
+            System.out.println("All aboard !!!!!");
             sim(simData, nodes, scheduler);
             break;
         case DIST:
-            NeuRonNode node = new NeuRonNode(nodeId,
-                    executor, scheduler, props);
+            NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
+                                            props, numNodes, semAllJoined);
             node.start();
             nodes.add(node);
             break;
