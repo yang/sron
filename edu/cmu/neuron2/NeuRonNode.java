@@ -427,7 +427,7 @@ public class NeuRonNode extends Thread {
                         Msg.Pong pong = (Msg.Pong) msg;
                         resetTimeoutAtNode(pong.src);
                         int rtt = (int) (System.currentTimeMillis() - pong.time);
-                        log("got pong msg. one way latency to " + pong.src + " = " + rtt/2);
+                        log("recv." + msg.getClass().getSimpleName(), "one way latency to " + pong.src + " = " + rtt/2);
                         ArrayList<Integer> sortedNids = memberNids();
                         probeTable[sortedNids.indexOf(myNid)][sortedNids.indexOf(pong.src)]
                                                                 = rtt / 2;
@@ -961,6 +961,14 @@ public class NeuRonNode extends Thread {
             oos.writeObject(m);
             routingOverheadInBytes += baos.size();
             baos.reset();
+
+            if (myNid != 0) {
+                endTime = System.currentTimeMillis();
+                long deltaInSec = (endTime - startTime) / 1000;
+                routingBandwidth = routingOverheadInBytes / deltaInSec;
+                log("Routing Bandwidth = " + routingBandwidth);
+            }
+
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }

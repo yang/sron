@@ -44,6 +44,7 @@ public class RonTest {
         Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
                 double routingBandwidth = 0;
+                System.out.println("#nodes = " + nodes.size());
                 for (NeuRonNode node : nodes) {
                     routingBandwidth += node.quit();
                 }
