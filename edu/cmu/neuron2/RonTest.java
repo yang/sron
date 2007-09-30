@@ -18,25 +18,29 @@ public class RonTest {
 
     public static enum RunMode { SIM, DIST }
 
-    private int numNodes;
     private Semaphore semAllJoined;
 
-    public RonTest(int num_nodes) {
-        numNodes = num_nodes;
+    public RonTest() {
         semAllJoined = new Semaphore(0);
     }
 
     public static void main(String[] args) throws Exception {
 
-        int num_nodes = 0;
-        if (args.length != 1) {
-            System.out.println("Usage: java RonTest numNodes");
-            System.exit(0);
-        } else {
-            num_nodes = Integer.parseInt(args[0]);
+        /*
+        Properties props = System.getProperties();
+        String config = System.getProperty("neuron.config");
+        if (config != null) {
+            props.load(new FileInputStream(config));
         }
+        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
+        String filter = props.getProperty("logfilter");
+        NeuRonNode.RoutingScheme scheme = NeuRonNode.RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
 
-        RonTest rt = new RonTest(num_nodes);
+        System.out.println("#nodes = " + numNodes + "; filter = " + filter + "; scheme = " + scheme);
+        //System.exit(0);
+        */
+
+        RonTest rt = new RonTest();
         rt.run();
     }
 
@@ -58,7 +62,7 @@ public class RonTest {
                 }
             }
         });
-        //int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
+        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
         int nodeId = Integer.parseInt(props.getProperty("nodeId", "0"));
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         String simData = props.getProperty("simData", "");

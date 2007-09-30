@@ -693,7 +693,7 @@ public class NeuRonNode extends Thread {
         // repopulateNeighborList();
     }
 
-    private static enum RoutingScheme { SIMPLE, SQRT, SQRT_SPECIAL };
+    public static enum RoutingScheme { SIMPLE, SQRT, SQRT_SPECIAL };
     private final RoutingScheme scheme;
 
     private HashSet<GridNode> getNeighborList() {
@@ -1033,7 +1033,7 @@ public class NeuRonNode extends Thread {
                 endTime = System.currentTimeMillis();
                 long deltaInSec = (endTime - startTime) / 1000;
                 routingBandwidth = routingOverheadInBytes / deltaInSec;
-                log("Routing Bandwidth = " + routingBandwidth);
+                log("Routing Bandwidth = " + routingBandwidth + "Bytes/sec");
             }
 
         } catch (IOException ex) {
