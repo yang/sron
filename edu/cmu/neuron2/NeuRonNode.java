@@ -98,7 +98,7 @@ public class NeuRonNode extends Thread {
         };
         Logger rootLogger = Logger.getLogger("");
         rootLogger.getHandlers()[0].setFormatter(fmt);
-        logger = Logger.getLogger("node" + myNid);
+        logger = Logger.getLogger("n" + myNid);
         if (props.getProperty("logfilter") != null) {
             String[] labels = props.getProperty("logfilter").split(" ");
             final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
@@ -149,15 +149,15 @@ public class NeuRonNode extends Thread {
     }
 
     private void log(String msg) {
-        logger.info(msg);
+        logger.info("{NODE " + myNid + "} " + msg);
     }
 
     private void warn(String msg) {
-        logger.warning(msg);
+        logger.warning("{NODE " + myNid + "} " + msg);
     }
 
     private void err(String msg) {
-        logger.severe(msg);
+        logger.severe("{NODE " + myNid + "} " + msg);
     }
 
     private void err(Exception ex) {
@@ -302,7 +302,12 @@ public class NeuRonNode extends Thread {
                             try {
                                 broadcastMeasurements();
                                 if (scheme != RoutingScheme.SIMPLE) {
-                                    broadcastRecommendations();
+                                    if (scheme == RoutingScheme.SQRT_SPECIAL) {
+                                        broadcastRecommendations2();
+                                    }
+                                    else {
+                                        broadcastRecommendations();
+                                    }
                                 }
                             } catch (Exception ex) {
                                 // failure-oblivious: swallow any exceptions and
@@ -590,9 +595,6 @@ public class NeuRonNode extends Thread {
         }
         nextHopTable = newNextHopTable; // forget about the old one
 
-
-        // TODO :: we lose previous measurements - need to fix this
-        // repopulateProbeTable() currently fills in random values
         repopulateGrid();
         repopulateProbeTable(oldNids);
         printGrid();
@@ -624,7 +626,7 @@ public class NeuRonNode extends Thread {
         // repopulateNeighborList();
     }
 
-    private static enum RoutingScheme { SIMPLE, SQRT };
+    private static enum RoutingScheme { SIMPLE, SQRT, SQRT_SPECIAL };
     private final RoutingScheme scheme;
 
     private HashSet<GridNode> getNeighborList() {
@@ -721,6 +723,7 @@ public class NeuRonNode extends Thread {
 
         probeTable = newProbeTable; // forget about the old one.
 
+        /*
         // for testing
         if (nodeIndex == 0) {
             for (int i = 1; i < memberNids().size(); i++) {
@@ -729,6 +732,7 @@ public class NeuRonNode extends Thread {
         } else {
             probeTable[nodeIndex][0] = 1;
         }
+        */
     }
 
     private String toStingMembership() {
@@ -970,7 +974,9 @@ public class NeuRonNode extends Thread {
             long deltaInSec = (endTime - startTime) / 1000;
             routingBandwidth = routingOverheadInBytes / deltaInSec;
         }
-        log("Routing Bandwidth = " + routingBandwidth);
+        if (myNid != 0) {
+            log("Routing Bandwidth = " + routingBandwidth);
+        }
         return routingBandwidth;
     }
 
