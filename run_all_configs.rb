@@ -10,7 +10,7 @@ system("rm #{TEMPDIR}/scaleron-log-*")
 
 for runtype in ["simple", "sqrt", "sqrt_special"]
     puts runtype
-    for numNodes in 4...6
+    for numNodes in 4..100
         puts "************************************************************"
         puts "-----> #{numNodes}"
         sub_dir = "#{runtype}/#{numNodes}"
