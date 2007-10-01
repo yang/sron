@@ -52,23 +52,22 @@ public class RonTest {
             props.load(new FileInputStream(config));
         }
 
+        final ExecutorService executor = Executors.newCachedThreadPool();
+        final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
         final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
         Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
-                double routingBandwidth = 0;
-                System.out.println("#nodes = " + nodes.size());
                 for (NeuRonNode node : nodes) {
-                    routingBandwidth += node.quit();
+                    node.quit();
                 }
+                executor.shutdown();
             }
         });
         int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
         int nodeId = Integer.parseInt(props.getProperty("nodeId", "0"));
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         String simData = props.getProperty("simData", "");
-
-        ExecutorService executor = Executors.newCachedThreadPool();
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
         switch (mode) {
         case SIM:

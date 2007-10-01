@@ -70,12 +70,6 @@ public class NeuRonNode extends Thread {
     public final int neighborBroadcastPeriod;
     public final int probePeriod;
 
-    // in bytes per second
-    private double routingBandwidth, routingOverheadInBytes;
-    private long startTime, endTime;
-
-    private final ByteArrayOutputStream baos;
-    private final ObjectOutputStream oos;
     private NodeInfo coordNode = new NodeInfo();
     private DatagramSocket sendSocket;
 
@@ -99,7 +93,7 @@ public class NeuRonNode extends Thread {
         Formatter fmt = new Formatter() {
             public String format(LogRecord record) {
                 StringBuffer buf = new StringBuffer();
-                buf.append(new Date(record.getMillis())).append(" ").append(
+                buf.append(record.getMillis()).append(' ').append(new Date(record.getMillis())).append(" ").append(
                         record.getLevel()).append(" ").append(
                         record.getLoggerName()).append(": ").append(
                         record.getMessage()).append("\n");
@@ -108,12 +102,14 @@ public class NeuRonNode extends Thread {
         };
         Logger rootLogger = Logger.getLogger("");
         rootLogger.getHandlers()[0].setFormatter(fmt);
-        logger = Logger.getLogger("n" + myNid);
+        logger = Logger.getLogger("node" + myNid);
         if (props.getProperty("logfilter") != null) {
             String[] labels = props.getProperty("logfilter").split(" ");
             final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
+            final boolean doConsole = !suppressedLabels.contains("all");
             rootLogger.getHandlers()[0].setFilter(new Filter() {
                 public boolean isLoggable(LogRecord record) {
+                    if (!doConsole) return false;
                     String[] parts = record.getLoggerName().split("\\.", 2);
                     return parts.length == 1
                             || !suppressedLabels.contains(parts[1]);
@@ -148,29 +144,20 @@ public class NeuRonNode extends Thread {
 //        cfg.getFilterChain().addLast("codec",
 //                new ProtocolCodecFilter(new ObjectSerializationCodecFactory()));
 
-        routingBandwidth = routingOverheadInBytes =0;
-        startTime = System.currentTimeMillis();
-        baos = new ByteArrayOutputStream();
-        try {
-            oos = new ObjectOutputStream(baos);
-        } catch (IOException ioe) {
-            throw new RuntimeException(ioe);
-        }
-
         numNodesHint = num_nodes_hint;
         semAllJoined = sem_all_joined;
     }
 
     private void log(String msg) {
-        logger.info("{NODE " + myNid + "} " + msg);
+        logger.info(msg);
     }
 
     private void warn(String msg) {
-        logger.warning("{NODE " + myNid + "} " + msg);
+        logger.warning(msg);
     }
 
     private void err(String msg) {
-        logger.severe("{NODE " + myNid + "} " + msg);
+        logger.severe(msg);
     }
 
     private void err(Exception ex) {
@@ -307,7 +294,7 @@ public class NeuRonNode extends Thread {
 
                 try {
                     // talk to coordinator
-                    log("sending join");
+                    log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
                     Msg.Join msg = new Msg.Join();
                     msg.addr = InetAddress.getLocalHost();
                     new ObjectOutputStream(s.getOutputStream()).writeObject(msg);
@@ -330,7 +317,6 @@ public class NeuRonNode extends Thread {
                 throw new RuntimeException(ex);
             }
 
-            startTime = System.currentTimeMillis();
             // now start accepting pings and other msgs,
             // also start sending probes and sending out other msgs
             try {
@@ -879,7 +865,6 @@ public class NeuRonNode extends Thread {
             }
             Msg.RoutingRecs msg = new Msg.RoutingRecs();
             msg.recs = recs;
-            recordOverhead(msg);
             sendObject(msg, src.id);
         }
     }
@@ -942,7 +927,6 @@ public class NeuRonNode extends Thread {
 
             Msg.RoutingRecs msg = new Msg.RoutingRecs();
             msg.recs = recs;
-            recordOverhead(msg);
             sendObject(msg, src.id);
         }
     }
@@ -951,10 +935,6 @@ public class NeuRonNode extends Thread {
     private void sendObject(final Msg o, int nid) {
         if (nid != myNid) {
             NodeInfo node = nid == 0 ? coordNode : nodes.get(nid);
-            log("send." + o.getClass().getSimpleName(),
-                    "to " + nid
-                    + " at " + node.addr + ":" + node.port +
-                    ", version = " + currentStateVersion);
             o.src = myNid;
             o.version = currentStateVersion;
 
@@ -967,17 +947,17 @@ public class NeuRonNode extends Thread {
                 ObjectOutputStream oos = new ObjectOutputStream(baos);
                 oos.writeObject(o);
                 byte[] buf = baos.toByteArray();
+                log("send." + o.getClass().getSimpleName(),
+                        String.format("to %d at %s:%d, version %d, len %d",
+                            nid,
+                            node.addr,
+                            node.port,
+                            currentStateVersion,
+                            buf.length));
                 sendSocket.send(new DatagramPacket(buf, buf.length, node.addr, node.port));
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
-//            new DatagramConnector().connect(new InetSocketAddress(node.addr, node.port),
-//                                            new IoHandlerAdapter() {
-//                @Override
-//                public void sessionCreated(IoSession session) {
-//                    session.write(o); // TODO :: need custom serialization
-//                }
-//            }, cfg);
         }
     }
 
@@ -988,7 +968,6 @@ public class NeuRonNode extends Thread {
         HashSet<GridNode> nl = getNeighborList();
         log("Sending measurements to neighbors. " + toStringNeighborList());
         for (GridNode neighbor : nl) {
-            recordOverhead(rm);
             sendObject(rm, neighbor.id);
         }
     }
@@ -1022,38 +1001,8 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private void recordOverhead(Msg m) {
-        try {
-            // TODO what a retarded way to record size - need custom serialization!
-            oos.writeObject(m);
-            double size = baos.size();
-            routingOverheadInBytes += size;
-            baos.reset();
-
-            if (myNid != 0) {
-                endTime = System.currentTimeMillis();
-                long deltaInSec = (endTime - startTime) / 1000;
-                routingBandwidth = routingOverheadInBytes / deltaInSec;
-                log("current msg overhead = " + size + " Bytes");
-                log("Routing Bandwidth = " + routingBandwidth + " Bytes/sec");
-            }
-
-        } catch (IOException ex) {
-            throw new RuntimeException(ex);
-        }
-    }
-
-    public double quit() {
+    public void quit() {
         this.doQuit = true;
-        synchronized (NeuRonNode.this) {
-            endTime = System.currentTimeMillis();
-            long deltaInSec = (endTime - startTime) / 1000;
-            routingBandwidth = routingOverheadInBytes / deltaInSec;
-        }
-        if (myNid != 0) {
-            log("Routing Bandwidth = " + routingBandwidth + " Bytes/sec");
-        }
-        return routingBandwidth;
     }
 
 }

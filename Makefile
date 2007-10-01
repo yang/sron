@@ -1,39 +1,33 @@
-TOP_DIR		=.
+# vim:noet:sw=4:ts=4
 
-# set here the target dir for all classes
-CLASS_DIR       =$(TOP_DIR)/classes
+TOP_DIR = .
+SRC_DIR = .
+CLASS_DIR = $(TOP_DIR)/classes
+#JAVAC_FLAGS = -g -deprecation
+JAVAC_FLAGS = -O
+JAVAC = javac
+JAVA = java
 
-# compiler field
-#JDEBUGFLAGS	= -g -deprecation
-#JDEBUGFLAGS	= -O -depend -nowarn
-JCC		= javac
-JAVA		= java
+all: compile
 
-all: clean compile
-
-LOCAL_CLASS_DIR       = $(CLASS_DIR)
+compile: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
 
 # create target class dir if not present.
-$(LOCAL_CLASS_DIR):
-	mkdir -p $(LOCAL_CLASS_DIR)
+$(CLASS_DIR):
+	mkdir -p $(CLASS_DIR)
 
-# new rule for java
-.SUFFIXES: .java .class
+JAR_DEPS = ext/mina-core-1.1.2.jar:ext/slf4j-api-1.4.3.jar:ext/slf4j-simple-1.4.3.jar
 
+$(CLASS_DIR)/edu/cmu/neuron2/RonTest.class: $(CLASS_DIR) $(SRC_DIR)/edu/cmu/neuron2/*.java
+	$(JAVAC) -d $(CLASS_DIR) -classpath $(JAR_DEPS) $(JAVAC_FLAGS) $(SRC_DIR)/edu/cmu/neuron2/*.java
 
-# magical command that tells make to find class files in another dir
-vpath %.class $(LOCAL_CLASS_DIR)
+clean: $(CLASS_DIR)
+	rm -rf $(CLASS_DIR)
 
+test: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
+	./run.bash
 
-compile:
-	CLASSPATH=$(CLASS_DIR):$(TOP_DIR) $(JCC) -nowarn -d $(CLASS_DIR) $(JDEBUGFLAGS) $(TOP_DIR)/edu/cmu/nuron/RonTest.java
+scaleron.jar: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
+	jar cf scaleron.jar -C $(CLASS_DIR) .
 
-clean:$(LOCAL_CLASS_DIR)
-	@@ echo 'rm -f $(LOCAL_CLASS_DIR)/*class'
-	@@rm -f $(LOCAL_CLASS_DIR)/*class
-
-test:
-	CLASSPATH=$(CLASS_DIR) $(JAVA) edu.cmu.nuron.RonTest 4 localhost 8100 false
-
-jar:
-	find edu/cmu/neuron2 -name '*.class' | xargs jar cf scaleron.jar
+jar: scaleron.jar

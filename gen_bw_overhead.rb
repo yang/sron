@@ -1,47 +1,51 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
+# vim:et:sw=2:ts=2
 
-BASEDIR = "."
-puts BASEDIR
-DATA_DUMP_DIR = "#{BASEDIR}/data_dump/"
-GRAPH_DIR = "#{BASEDIR}/graphs"
-TMP_DIR = "#{BASEDIR}/tmp"
+basedir = "."
+datadir = "#{basedir}/data"
+graphdir = "#{basedir}/graphs"
+schemes = ["simple", "sqrt", "sqrt_special"]
 
-for runtype in ["SIMPLE", "SQRT", "SQRT_SPECIAL"]
-    puts runtype
-    out = File.new("./#{runtype}.dat", "w")
-    for numNodes in 4...10
-        sub_dir = "#{runtype}/#{numNodes}"
-
-        #system("for file in $(ls #{DATA_DUMP_DIR}/#{sub_dir}/scaleron-log-*); do grep -i \"bandwidth\" $file | tail -n1; done | awk '{print $14}' | ~/tools/UnixStat/bin/stats min max mean");
-        num_avg = `for file in $(ls #{DATA_DUMP_DIR}/#{sub_dir}/scaleron-log-*); do grep -i \"bandwidth\" $file | tail -n1; done | awk '{print $14}' | ../tools/UnixStat/bin/stats mean`
-        out.puts "#{numNodes} #{num_avg}"
-    end
-    out.close
-end
-
-
-
-out2 = File.new("graph_neuron_bw_overhead_comparison.gp", "w")
-
-out2.puts "set terminal postscript pdf monochrome;"
-out2.puts "set size 0.65"
-out2.puts "set output '#{GRAPH_DIR}/_graph_neuron_bw_overhead_comparison.pdf';"
-out2.puts "set title \"Comparison of routing bandwidth overhead\";"
-out2.puts "set xlabel \"number of nodes\"; set ylabel \"routing bandwidth overhead (bytes/sec)\";"
-str = "plot "
-for runtype in ["SIMPLE", "SQRT", "SQRT_SPECIAL"]
-        str += "'#{runtype}.dat' using 1:2 with linespoints title '#{runtype}'"
-        if runtype != "SQRT_SPECIAL" then
-                str += ","
+for scheme in schemes
+  File.open("#{datadir}/#{scheme}.dat", "w") do |out|
+    for numNodes in 5..15 # [4, 9, 16, 25, 36, 49, 64, 81, 100]
+      subdir = "#{datadir}/#{scheme}/#{numNodes}"
+      xs = []
+      for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
+        File.open(path) do |f|
+          startTime = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
+          f.seek(0)
+          bytes, endTime = 0, 0
+          f.grep(/send\.(Measurements|RoutingRecs)/) do |line|
+            fields = line.split(' ')
+            bytes += Integer(fields[-1])
+            endTime = Integer(fields[0])
+          end
+          xs << bytes.to_f / ((endTime - startTime) / 1000.0)
         end
+      end
+      averageSize = xs.inject{|x,y| x+y} / xs.size.to_f
+      out.puts "#{numNodes} #{averageSize}"
+    end
+  end
 end
 
-out2.puts "#{str};"
-out2.puts ""
+plots = []
+for scheme in schemes
+  plots << "'#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+end
+plots = plots.join(', ')
 
-out2.close
-system("cat graph_neuron_bw_overhead_comparison.gp | gnuplot -")
+File.open("#{datadir}/bandwidth.gnuplot", "w") do |out|
+  out.puts %Q{
+set terminal postscript pdf monochrome
+set size 0.65
+set output '../#{graphdir}/bandwidth.pdf'
+set title "Comparison of routing bandwidth overhead"
+set xlabel "number of nodes"
+set ylabel "routing bandwidth overhead (bytes/sec)"
+plot #{plots}
+}
+end
 
-system("rm graph_neuron_bw_overhead_comparison.gp")
-system("rm *.dat")
-
+# system("cat bandwidth.gnuplot | gnuplot -")
