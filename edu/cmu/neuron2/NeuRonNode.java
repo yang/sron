@@ -149,15 +149,19 @@ public class NeuRonNode extends Thread {
     }
 
     private void log(String msg) {
-        logger.info(msg);
+        // the node id has to be logged here because
+        // the node id received in the constructor (and passed to Logger) is different
+        // from that in the InitMsg
+        // This is the correct node ID !!!
+        logger.info("{NODE " + myNid + "} " + msg);
     }
 
     private void warn(String msg) {
-        logger.warning(msg);
+        logger.warning("{NODE " + myNid + "} " + msg);
     }
 
     private void err(String msg) {
-        logger.severe(msg);
+        logger.severe("{NODE " + myNid + "} " + msg);
     }
 
     private void err(Exception ex) {
@@ -958,6 +962,19 @@ public class NeuRonNode extends Thread {
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
+
+            /*
+              leave this commented region here
+              This is was not a good idea because it would open a new socket every time.
+              we now instead use a single socket (sendSocket).
+            */
+//            new DatagramConnector().connect(new InetSocketAddress(node.addr, node.port),
+//                                            new IoHandlerAdapter() {
+//                @Override
+//                public void sessionCreated(IoSession session) {
+//                    session.write(o); // TODO :: need custom serialization
+//                }
+//            }, cfg);
         }
     }
 

@@ -4,11 +4,12 @@
 basedir = "."
 datadir = "#{basedir}/data"
 graphdir = "#{basedir}/graphs"
-schemes = ["simple", "sqrt", "sqrt_special"]
+#schemes = ["simple", "sqrt", "sqrt_special"]
+schemes = ["simple", "sqrt"]
 
 for scheme in schemes
   File.open("#{datadir}/#{scheme}.dat", "w") do |out|
-    for numNodes in 5..15 # [4, 9, 16, 25, 36, 49, 64, 81, 100]
+    for numNodes in 5..7 # [4, 9, 16, 25, 36, 49, 64, 81, 100]
       subdir = "#{datadir}/#{scheme}/#{numNodes}"
       xs = []
       for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
@@ -48,4 +49,4 @@ plot #{plots}
 }
 end
 
-# system("cat bandwidth.gnuplot | gnuplot -")
+system("cat bandwidth.gnuplot | gnuplot -")
