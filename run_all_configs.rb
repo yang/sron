@@ -2,7 +2,7 @@
 
 BASEDIR = "."
 puts BASEDIR
-DATA_DUMP_DIR = "#{BASEDIR}/data_dump"
+DATA_DUMP_DIR = "#{BASEDIR}/data"
 TEMPDIR = "/tmp"
 
 system("mkdir -p #{DATA_DUMP_DIR}");
