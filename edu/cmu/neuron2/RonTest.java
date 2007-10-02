@@ -52,7 +52,7 @@ public class RonTest {
             props.load(new FileInputStream(config));
         }
 
-        final ExecutorService executor = Executors.newCachedThreadPool();
+        final ExecutorService executor = Executors.newSingleThreadExecutor();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
         final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
