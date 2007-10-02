@@ -8,7 +8,7 @@ schemes = ["simple", "sqrt", "sqrt_special"]
 
 for scheme in schemes
   File.open("#{datadir}/#{scheme}.dat", "w") do |out|
-    for numNodes in 4..100 # [4, 9, 16, 25, 36, 49, 64, 81, 100]
+    for numNodes in [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
       subdir = "#{datadir}/#{scheme}/#{numNodes}"
       xs = []
       for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
@@ -31,17 +31,19 @@ for scheme in schemes
 end
 
 for gtype in ["monochrome", "color"]
-    plots = []
-    for scheme in schemes
-        plots << "'#{datadir}/#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
-    end
-    plots = plots.join(', ')
+  plots = []
+  for scheme in schemes
+      plots << "'#{datadir}/#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+  end
+  plots = plots.join(', ')
 
-    File.open("bandwidth.gnuplot", "w") do |out|
-        out.puts %Q{
-set terminal postscript eps #{gtype}
+  # XXX set terminal postscript eps #{gtype}
+  # set output '#{graphdir}/bandwidth_#{gtype}.eps'
+  File.open("bandwidth.gnuplot", "w") do |out|
+      out.puts %Q{
+set terminal png
 set size 0.65
-set output '#{graphdir}/bandwidth_#{gtype}.eps'
+set output '#{graphdir}/bandwidth_#{gtype}.png'
 set title "Comparison of routing bandwidth overhead"
 set xlabel "number of nodes"
 set ylabel "routing bandwidth overhead (Kbps)"
@@ -49,7 +51,7 @@ set key left top
 plot #{plots}
 
 }
-    end
+  end
 end
 
 system("cat bandwidth.gnuplot | gnuplot -")

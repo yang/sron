@@ -35,6 +35,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.*;
 import java.util.logging.FileHandler;
 import java.util.logging.Filter;
 import java.util.logging.Formatter;
@@ -49,6 +50,21 @@ import org.apache.mina.transport.socket.nio.DatagramAcceptor;
 import org.apache.mina.transport.socket.nio.DatagramAcceptorConfig;
 
 import edu.cmu.neuron2.RonTest.RunMode;
+
+class LabelFilter implements Filter {
+    private final HashSet<String> suppressedLabels;
+    private final boolean suppressAll;
+    public LabelFilter(HashSet<String> suppressedLabels) {
+        this.suppressedLabels = suppressedLabels;
+        this.suppressAll = suppressedLabels.contains("all");
+    }
+    public boolean isLoggable(LogRecord record) {
+        if (suppressAll) return false;
+        String[] parts = record.getLoggerName().split("\\.", 2);
+        return parts.length == 1
+                || !suppressedLabels.contains(parts[1]);
+    }
+}
 
 public class NeuRonNode extends Thread {
     private final ExecutorService executor;
@@ -83,6 +99,14 @@ public class NeuRonNode extends Thread {
     private final int numNodesHint;
     private Semaphore semAllJoined;
 
+    private void createLabelFilter(Properties props, String labelSet, Handler handler) {
+        if (props.getProperty(labelSet) != null) {
+            String[] labels = props.getProperty(labelSet).split(" ");
+            final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
+            handler.setFilter(new LabelFilter(suppressedLabels));
+        }
+    }
+
     public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler,
                         Properties props, int num_nodes_hint, Semaphore sem_all_joined) {
         myNid = id;
@@ -109,24 +133,13 @@ public class NeuRonNode extends Thread {
         Logger rootLogger = Logger.getLogger("");
         rootLogger.getHandlers()[0].setFormatter(fmt);
         logger = Logger.getLogger("node" + myNid);
-        if (props.getProperty("logfilter") != null) {
-            String[] labels = props.getProperty("logfilter").split(" ");
-            final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
-            final boolean doConsole = !suppressedLabels.contains("all");
-            rootLogger.getHandlers()[0].setFilter(new Filter() {
-                public boolean isLoggable(LogRecord record) {
-                    if (!doConsole) return false;
-                    String[] parts = record.getLoggerName().split("\\.", 2);
-                    return parts.length == 1
-                            || !suppressedLabels.contains(parts[1]);
-                }
-            });
-        }
+        createLabelFilter(props, "consoleLogFilter", rootLogger.getHandlers()[0]);
 
         try {
             String logFileBase = props.getProperty("logFileBase", "%t/scaleron-log-");
             FileHandler fh = new FileHandler(logFileBase + myNid);
             fh.setFormatter(fmt);
+            createLabelFilter(props, "fileLogFilter", fh);
             logger.addHandler(fh);
 
             sendSocket = new DatagramSocket();
@@ -214,11 +227,13 @@ public class NeuRonNode extends Thread {
                         final int nodeId = nextNodeId++;
 
                         if (mode == RunMode.SIM) {
-                            incomingSocks.put(nodeId, incoming);
+                        	synchronized (NeuRonNode.this) {
+                        		incomingSocks.put(nodeId, incoming);
+                        	}
                             executor.submit(new Runnable() {
                                 public void run() {
                                     try {
-                                        Join msg = (Join) Serialization.deserialize(new DataInputStream(incoming.getInputStream()));
+                                        Join msg = (Join) new Serialization().deserialize(new DataInputStream(incoming.getInputStream()));
 
                                         synchronized (NeuRonNode.this) {
                                             addMemberWithoutBroadcast(nodeId, msg.addr, basePort + nodeId);
@@ -233,7 +248,7 @@ public class NeuRonNode extends Thread {
                                                         im.version = currentStateVersion;
                                                         im.members = memberList;
                                                         DataOutputStream dos = new DataOutputStream(incomingSocks.get(member.id).getOutputStream());
-                                                        Serialization.serialize(im, dos);
+                                                        new Serialization().serialize(im, dos);
                                                         dos.flush();
                                                     } finally {
                                                         incomingSocks.get(member.id).close();
@@ -243,7 +258,7 @@ public class NeuRonNode extends Thread {
                                             }
                                         }
                                     }  catch (Exception ex) {
-                                        throw new RuntimeException(ex);
+                                        err(ex);
                                     }
                                 }
                             });
@@ -308,11 +323,11 @@ public class NeuRonNode extends Thread {
                     Join msg = new Join();
                     msg.addr = InetAddress.getLocalHost();
                     DataOutputStream dos = new DataOutputStream(s.getOutputStream());
-                    Serialization.serialize(msg, dos);
+                    new Serialization().serialize(msg, dos);
                     dos.flush();
 
                     log("waiting for InitMsg");
-                    Init im = (Init) Serialization.deserialize(new DataInputStream(s.getInputStream()));
+                    Init im = (Init) new Serialization().deserialize(new DataInputStream(s.getInputStream()));
                     assert im.id > 0;
                     myNid = im.id;
                     currentStateVersion = im.version;
@@ -412,7 +427,7 @@ public class NeuRonNode extends Thread {
         byte[] bytes = new byte[buf.limit()];
         buf.get(bytes);
         try {
-            return (Msg) Serialization.deserialize(new DataInputStream(new
+            return (Msg) new Serialization().deserialize(new DataInputStream(new
                         ByteArrayInputStream(bytes)));
         } catch (Exception ex) {
             throw new RuntimeException(ex);
@@ -953,6 +968,8 @@ public class NeuRonNode extends Thread {
         }
     }
 
+    private Serialization senderSer = new Serialization();
+
     private void sendObject(final Msg o, int nid) {
         if (nid != myNid) {
             NodeInfo node = nid == 0 ? coordNode : nodes.get(nid);
@@ -965,7 +982,7 @@ public class NeuRonNode extends Thread {
                  * least, i don't know how (reset() is insufficient)
                  */
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                Serialization.serialize(o, new DataOutputStream(baos));
+                senderSer.serialize(o, new DataOutputStream(baos));
                 byte[] buf = baos.toByteArray();
                 log("send." + o.getClass().getSimpleName() + " to " + nid + " len " + buf.length);
                 sendSocket.send(new DatagramPacket(buf, buf.length, node.addr, node.port));
@@ -1098,6 +1115,15 @@ class GridNode {
 
 
 
+
+
+
+
+
+
+
+
+
 class NodeInfo  {
 int id;
 int port;
@@ -1144,7 +1170,7 @@ class PeeringRequest extends Msg {
       class Serialization {
     
 
-      public static void serialize(Object obj, DataOutputStream out) throws IOException {
+      public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
       
 else if (obj.getClass() == NodeInfo.class) {
@@ -1243,24 +1269,24 @@ out.writeInt(casted.version);
 }
 }
 
-      public static Object deserialize(DataInputStream in) throws IOException {
-      switch (in.readInt()) {
+      public Object deserialize(DataInputStream in) throws IOException {
+      switch (readInt(in)) {
     
 case 0: { // NodeInfo
 NodeInfo obj;
 {
 obj = new NodeInfo();
 {
-obj.id = in.readInt();
+obj.id = readInt(in);
 }
 {
-obj.port = in.readInt();
+obj.port = readInt(in);
 }
 {
 byte[] buf;
 {
 
-          buf = new byte[in.readInt()];
+          buf = new byte[readInt(in)];
           in.read(buf);
         
 }
@@ -1275,10 +1301,10 @@ Rec obj;
 {
 obj = new Rec();
 {
-obj.dst = in.readInt();
+obj.dst = readInt(in);
 }
 {
-obj.via = in.readInt();
+obj.via = readInt(in);
 }
 }
 return obj;}
@@ -1287,10 +1313,10 @@ Msg obj;
 {
 obj = new Msg();
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 return obj;}
@@ -1302,7 +1328,7 @@ obj = new Join();
 byte[] buf;
 {
 
-          buf = new byte[in.readInt()];
+          buf = new byte[readInt(in)];
           in.read(buf);
         
 }
@@ -1312,10 +1338,10 @@ byte[] buf;
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1325,25 +1351,25 @@ Init obj;
 {
 obj = new Init();
 {
-obj.id = in.readInt();
+obj.id = readInt(in);
 }
 {
 obj.members = new ArrayList<NodeInfo>();
-for (int i = 0, len = in.readInt(); i < len; i++) {
+for (int i = 0, len = readInt(in); i < len; i++) {
 NodeInfo x;
 {
 x = new NodeInfo();
 {
-x.id = in.readInt();
+x.id = readInt(in);
 }
 {
-x.port = in.readInt();
+x.port = readInt(in);
 }
 {
 byte[] buf;
 {
 
-          buf = new byte[in.readInt()];
+          buf = new byte[readInt(in)];
           in.read(buf);
         
 }
@@ -1357,10 +1383,10 @@ obj.members.add(x);
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1371,21 +1397,21 @@ Membership obj;
 obj = new Membership();
 {
 obj.members = new ArrayList<NodeInfo>();
-for (int i = 0, len = in.readInt(); i < len; i++) {
+for (int i = 0, len = readInt(in); i < len; i++) {
 NodeInfo x;
 {
 x = new NodeInfo();
 {
-x.id = in.readInt();
+x.id = readInt(in);
 }
 {
-x.port = in.readInt();
+x.port = readInt(in);
 }
 {
 byte[] buf;
 {
 
-          buf = new byte[in.readInt()];
+          buf = new byte[readInt(in)];
           in.read(buf);
         
 }
@@ -1398,14 +1424,14 @@ obj.members.add(x);
 }
 }
 {
-obj.numNodes = in.readInt();
+obj.numNodes = readInt(in);
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1416,15 +1442,15 @@ RoutingRecs obj;
 obj = new RoutingRecs();
 {
 obj.recs = new ArrayList<Rec>();
-for (int i = 0, len = in.readInt(); i < len; i++) {
+for (int i = 0, len = readInt(in); i < len; i++) {
 Rec x;
 {
 x = new Rec();
 {
-x.dst = in.readInt();
+x.dst = readInt(in);
 }
 {
-x.via = in.readInt();
+x.via = readInt(in);
 }
 }
 obj.recs.add(x);
@@ -1432,10 +1458,10 @@ obj.recs.add(x);
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1450,16 +1476,16 @@ obj.time = in.readLong();
 {
 obj.info = new NodeInfo();
 {
-obj.info.id = in.readInt();
+obj.info.id = readInt(in);
 }
 {
-obj.info.port = in.readInt();
+obj.info.port = readInt(in);
 }
 {
 byte[] buf;
 {
 
-          buf = new byte[in.readInt()];
+          buf = new byte[readInt(in)];
           in.read(buf);
         
 }
@@ -1470,10 +1496,10 @@ byte[] buf;
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1487,10 +1513,10 @@ obj.time = in.readLong();
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1501,16 +1527,16 @@ Measurements obj;
 obj = new Measurements();
 {
 obj.membershipList = new ArrayList<Integer>();
-for (int i = 0, len = in.readInt(); i < len; i++) {
+for (int i = 0, len = readInt(in); i < len; i++) {
 Integer x;
 {
-x = in.readInt();
+x = readInt(in);
 }
 obj.membershipList.add(x);
 }
 }
 {
-obj.probeTable = new long[in.readInt()];
+obj.probeTable = new long[readInt(in)];
 for (int i = 0; i < obj.probeTable.length; i++) {
 {
 obj.probeTable[i] = in.readLong();
@@ -1519,10 +1545,10 @@ obj.probeTable[i] = in.readLong();
 }
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1533,10 +1559,10 @@ MemberPoll obj;
 obj = new MemberPoll();
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1547,10 +1573,10 @@ PeeringRequest obj;
 obj = new PeeringRequest();
 {
 {
-obj.src = in.readInt();
+obj.src = readInt(in);
 }
 {
-obj.version = in.readInt();
+obj.version = readInt(in);
 }
 }
 }
@@ -1558,6 +1584,18 @@ return obj;}
 
     default:throw new RuntimeException("unknown obj type");}}
 
+    private byte[] readBuffer = new byte[4];
+
+    public int readInt(DataInputStream dis) throws IOException {
+      dis.readFully(readBuffer, 0, 4);
+      return (
+        ((int)(readBuffer[0] & 255) << 24) +
+        ((readBuffer[1] & 255) << 16) +
+        ((readBuffer[2] & 255) <<  8) +
+        ((readBuffer[3] & 255) <<  0));
+    }
+
+    /*
     public static void main(String[] args) throws IOException {
 {
      ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -1584,10 +1622,10 @@ return obj;}
       m.membershipList.add(4);
       m.membershipList.add(5);
       m.membershipList.add(6);
-      m.probeTable = new long[5];
-      m.probeTable[1] = 7;
-      m.probeTable[2] = 8;
-      m.probeTable[3] = 9;
+      m.ProbeTable = new long[5];
+      m.ProbeTable[1] = 7;
+      m.ProbeTable[2] = 8;
+      m.ProbeTable[3] = 9;
 
       serialize(m, out);
       byte[] buf = baos.toByteArray();
@@ -1622,6 +1660,5 @@ return obj;}
     new ByteArrayInputStream(buf)));
   System.out.println(obj);
 }
+    }*/
     }
-    }
-

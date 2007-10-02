@@ -55,14 +55,15 @@ object gen {
     println("{")
     typ match {
       case x if isPrimitive(x) =>
-        println(<p>{dest} = in.read{primitives(x)}();</p>.text)
+        if (x == "int") println(<p>{dest} = readInt(in);</p>.text)
+        else println(<p>{dest} = in.read{primitives(x)}();</p>.text)
       case "Array<byte>" =>
         println(<p>
-          {dest} = new byte[in.readInt()];
+          {dest} = new byte[readInt(in)];
           in.read({dest});
         </p>.text)
       case x if x startsWith "Array<" => {
-        println(<p>{dest} = new {nested(typ)}[in.readInt()];</p>.text)
+        println(<p>{dest} = new {nested(typ)}[readInt(in)];</p>.text)
         println("for (int i = 0; i < " + dest + ".length; i++) {")
         genRead(nested(typ), dest + "[i]")
         println("}")
@@ -80,13 +81,13 @@ object gen {
       }
       case x if x startsWith "ArrayList" => {
         println(<p>{dest} = new ArrayList&lt;{nested(typ)}&gt;();</p>.text)
-        println( "for (int i = 0, len = in.readInt(); i < len; i++) {" )
+        println( "for (int i = 0, len = readInt(in); i < len; i++) {" )
         genReadDecl(nested(typ), "x");
         println(dest + ".add(x);")
         println("}")
       }
       case x if castables contains x =>
-        println(dest + " = in.readInt();")
+        println(dest + " = readInt(in);")
       case _ => println("Other: " + typ) // throw new Exception("shit")
     }
     println("}")
@@ -157,7 +158,7 @@ object gen {
       class Serialization {
     """)
     println("""
-      public static void serialize(Object obj, DataOutputStream out) throws IOException {
+      public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
       """)
     for ((c,i) <- allTypes(types) zipWithIndex) {
@@ -168,8 +169,8 @@ object gen {
     }
     println("}")
     println("""
-      public static Object deserialize(DataInputStream in) throws IOException {
-      switch (in.readInt()) {
+      public Object deserialize(DataInputStream in) throws IOException {
+      switch (readInt(in)) {
     """)
     for ((c,i) <- allTypes(types) zipWithIndex) {
       println(<p>case {i}: {{ // {c.name}</p>.text)
@@ -179,6 +180,18 @@ object gen {
     println("""
     default:throw new RuntimeException("unknown obj type");}}
 
+    private byte[] readBuffer = new byte[4];
+
+    public int readInt(DataInputStream dis) throws IOException {
+      dis.readFully(readBuffer, 0, 4);
+      return (
+        ((int)(readBuffer[0] & 255) << 24) +
+        ((readBuffer[1] & 255) << 16) +
+        ((readBuffer[2] & 255) <<  8) +
+        ((readBuffer[3] & 255) <<  0));
+    }
+
+    /*
     public static void main(String[] args) throws IOException {
 {
      ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -243,7 +256,7 @@ object gen {
     new ByteArrayInputStream(buf)));
   System.out.println(obj);
 }
-    }
+    }*/
     }""")
   }
 }
