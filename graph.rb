@@ -4,12 +4,13 @@
 basedir = "."
 datadir = "#{basedir}/data"
 graphdir = "#{basedir}/graphs"
-schemes = ["simple", "sqrt", "sqrt_special"]
+schemes = ["simple", "sqrt"]
 
 for scheme in schemes
   File.open("#{datadir}/#{scheme}.dat", "w") do |out|
-    for numNodes in [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
+    for numNodes in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100] # [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
       subdir = "#{datadir}/#{scheme}/#{numNodes}"
+      puts subdir
       xs = []
       for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
         File.open(path) do |f|

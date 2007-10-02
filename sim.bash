@@ -16,11 +16,12 @@ remkdir() {
   mkdir -p "$1"
 }
 
-# remkdir "$datadir"
+if [[ "$1" == clean ]]
+then echo cleaning; remkdir "$datadir"; shift
+fi
 
 for scheme in simple sqrt sqrt_special ; do
-  # for numnodes in {5..15} ; do # 4 9 16 25 36 49 64 81 100 ; do
-  for numnodes in 80 100 ; do # $(seq 90 10 100) ; do
+  for numnodes in "$@" ; do
     echo $scheme $numnodes
     subdir="$datadir/$scheme/$numnodes"
     remkdir "$subdir"
