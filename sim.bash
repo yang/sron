@@ -20,12 +20,13 @@ if [[ "$1" == clean ]]
 then echo cleaning; remkdir "$datadir"; shift
 fi
 
-for scheme in simple sqrt sqrt_special ; do
+for scheme in sqrt_special ; do # simple sqrt sqrt_special ; do
   for numnodes in "$@" ; do
     echo $scheme $numnodes
     subdir="$datadir/$scheme/$numnodes"
     remkdir "$subdir"
-    ./run.bash delay \
+    ./run.bash \
+        -DtotalTime=60 \
         -DlogFileBase="$subdir/" \
         -DfileLogFilter='send.Ping recv.Ping send.Pong recv.Pong' \
         -DconsoleLogFilter=all \

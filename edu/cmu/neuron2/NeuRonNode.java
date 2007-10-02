@@ -30,17 +30,14 @@ import java.util.Hashtable;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.*;
-import java.util.logging.FileHandler;
-import java.util.logging.Filter;
 import java.util.logging.Formatter;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 
 import org.apache.mina.common.ByteBuffer;
 import org.apache.mina.common.IoHandlerAdapter;
@@ -74,7 +71,7 @@ public class NeuRonNode extends Thread {
     private final String coordinatorHost;
     private final int basePort;
     private final AtomicBoolean doQuit = new AtomicBoolean();
-    private final Logger logger;
+    private Logger logger;
 
     private final Hashtable<Integer, NodeInfo> nodes = new Hashtable<Integer, NodeInfo>();
 
@@ -92,17 +89,19 @@ public class NeuRonNode extends Thread {
     public final int neighborBroadcastPeriod;
     public final int probePeriod;
 
-    //private NodeInfo coordNode = new NodeInfo();
-    private NodeInfo coordNode;
-    private DatagramSocket sendSocket;
+    private final NodeInfo coordNode;
+    private final DatagramSocket sendSocket;
 
-    private RunMode mode;
+    private final RunMode mode;
     private final int numNodesHint;
-    private Semaphore semAllJoined;
+    private final Semaphore semAllJoined;
 
-    private InetAddress myCachedAddr;
+    private final InetAddress myCachedAddr;
     private ArrayList<Integer> cachedMemberNids; // sorted list of members
     private int cachedMemberNidsVersion;
+    private final boolean blockJoins;
+    private final boolean capJoins;
+    private final int joinTimeLimit; // seconds
 
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         if (props.getProperty(labelSet) != null) {
@@ -113,10 +112,10 @@ public class NeuRonNode extends Thread {
     }
 
     public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler,
-                        Properties props, int num_nodes_hint, Semaphore sem_all_joined,
-                        InetAddress my_cached_addr, String coordinator_host, NodeInfo coord_node) {
+                        Properties props, int numNodes, Semaphore semJoined,
+                        InetAddress myAddr, String coordinatorHost, NodeInfo coordNode) {
 
-        if ((coord_node == null) || (coord_node.addr == null)){
+        if ((coordNode == null) || (coordNode.addr == null)){
             throw new RuntimeException("coordNode is null!");
         }
 
@@ -124,19 +123,23 @@ public class NeuRonNode extends Thread {
         currentStateVersion = 0;
         cachedMemberNidsVersion = -1;
         cachedMemberNids = new ArrayList<Integer>();
+        joinTimeLimit = Integer.parseInt(props.getProperty("joinTimeLimit", "300")); // wait up to 5 minutes by default
+        
+        blockJoins = Boolean.valueOf(props.getProperty("blockJoins", "true"));
+        capJoins = Boolean.valueOf(props.getProperty("capJoins", "true"));
 
-        coordinatorHost = coordinator_host;
-        coordNode = coord_node;
+        this.coordinatorHost = coordinatorHost;
+        this.coordNode = coordNode;
 
         basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "10"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
-        if (mode != RunMode.SIM) {
-            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
-        } else {
+        if (mode == RunMode.SIM) {
             probePeriod = Integer.parseInt(props.getProperty("probePeriod", "60"));
+        } else {
+            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
         }
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 5));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
@@ -174,13 +177,11 @@ public class NeuRonNode extends Thread {
         grid = null;
         numCols = numRows = 0;
         isCoordinator = myNid == 0;
-//        cfg.getFilterChain().addLast("codec",
-//                new ProtocolCodecFilter(new ObjectSerializationCodecFactory()));
 
-        numNodesHint = num_nodes_hint;
-        semAllJoined = sem_all_joined;
+        numNodesHint = Integer.parseInt(props.getProperty("numNodesHint", "" + numNodes));
+        semAllJoined = semJoined;
 
-        if (my_cached_addr == null) {
+        if (myAddr == null) {
             try {
                 myCachedAddr = InetAddress.getLocalHost();
             } catch (UnknownHostException ex) {
@@ -188,7 +189,7 @@ public class NeuRonNode extends Thread {
             }
         }
         else {
-            myCachedAddr = my_cached_addr;
+            myCachedAddr = myAddr;
         }
     }
 
@@ -197,15 +198,15 @@ public class NeuRonNode extends Thread {
         // the node id received in the constructor (and passed to Logger) is different
         // from that in the InitMsg
         // This is the correct node ID !!!
-        logger.info("{NODE " + myNid + "} " + msg);
+        logger.info(msg);
     }
 
     private void warn(String msg) {
-        logger.warning("{NODE " + myNid + "} " + msg);
+        logger.warning(msg);
     }
 
     private void err(String msg) {
-        logger.severe("{NODE " + myNid + "} " + msg);
+        logger.severe(msg);
     }
 
     private void err(Exception ex) {
@@ -224,12 +225,30 @@ public class NeuRonNode extends Thread {
     private void log(String name, Object value) {
         Logger.getLogger(logger.getName() + "." + name).info(value.toString());
     }
-
+    
+    public static final class PlannedException extends RuntimeException {
+    	public PlannedException(String msg) {
+    		super(msg);
+    	}
+    }
+    
+    public final AtomicReference<PlannedException> failure = new AtomicReference<PlannedException>();
     public void run() {
+    	try {
+    		run2();
+    	} catch (PlannedException ex) {
+    		log(ex.getMessage());
+    		failure.set(ex);
+    		if (semAllJoined != null) semAllJoined.release();
+    	}
+    }
+
+    public void run2() {
         if (isCoordinator) {
             try {
                 int nextNodeId = 1;
-                //Thread.sleep(2000);
+                // do not remove this for now
+                Thread.sleep(2000);
                 new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
                         .getLocalHost(), basePort), new CoordReceiver(), cfg);
                 ServerSocket ss = new ServerSocket(basePort);
@@ -240,6 +259,7 @@ public class NeuRonNode extends Thread {
                     ss.setReuseAddress(true);
                     ss.setSoTimeout(1000);
                     log("Beep!");
+                    
 
                     final Hashtable<Integer, Socket> incomingSocks = new Hashtable<Integer, Socket>();
                     while (!doQuit.get()) {
@@ -251,71 +271,78 @@ public class NeuRonNode extends Thread {
                         }
                         final int nodeId = nextNodeId++;
 
-                        if (mode == RunMode.SIM) {
-                            synchronized (NeuRonNode.this) {
-                                incomingSocks.put(nodeId, incoming);
-                            }
-                            executor.submit(new Runnable() {
-                                public void run() {
-                                    try {
-                                        Join msg = (Join) new Serialization().deserialize(new DataInputStream(incoming.getInputStream()));
+                        executor.submit(new Runnable() {
+                            public void run() {
+                                try {
+                                    Join msg = (Join) new Serialization().deserialize(new DataInputStream(incoming.getInputStream()));
 
-                                        synchronized (NeuRonNode.this) {
-                                            addMemberWithoutBroadcast(nodeId, msg.addr, basePort + nodeId);
+                                    synchronized (NeuRonNode.this) {
+                                		incomingSocks.put(nodeId, incoming);
+                                    	if (!capJoins || nodes.size() < numNodesHint) {
+                                            addMember(nodeId, msg.addr, basePort + nodeId);
                                             if (nodes.size() == numNodesHint) {
-                                                // time to broadcast ims to everyone
-                                                ArrayList<NodeInfo> memberList = new ArrayList<NodeInfo>(nodes.values());
-                                                for (NodeInfo member : memberList) {
-                                                    resetTimeoutAtCoord(member.id);
-                                                    try {
-                                                        Init im = new Init();
-                                                        im.id = member.id;
-                                                        im.version = currentStateVersion;
-                                                        im.members = memberList;
-                                                        DataOutputStream dos = new DataOutputStream(incomingSocks.get(member.id).getOutputStream());
-                                                        new Serialization().serialize(im, dos);
-                                                        dos.flush();
-                                                    } finally {
-                                                        incomingSocks.get(member.id).close();
-                                                    }
-                                                }
-                                                semAllJoined.release();
+                                            	semAllJoined.release();
+                                            	doQuit.set(true);
                                             }
-                                        }
-                                    }  catch (Exception ex) {
-                                        err(ex);
-                                    }
-                                }
-                            });
-                        }
-                        else {
-                            resetTimeoutAtCoord(nodeId);
-                            executor.submit(new Runnable() {
-                                public void run() {
-                                    try {
-                                        Join msg = (Join) new ObjectInputStream(incoming.getInputStream())
-                                                                        .readObject();
-                                        try {
-                                            Init im = new Init();
-                                            im.id = nodeId;
-                                            synchronized (NeuRonNode.this) {
-                                                addMember(nodeId, msg.addr,
-                                                          basePort + nodeId);
-                                                im.version = currentStateVersion;
-                                                im.members = new ArrayList<NodeInfo>(nodes.values());
+                                            if (nodes.size() >= numNodesHint) {
+	                                            if (blockJoins) {
+	                                                // time to broadcast ims to everyone
+	                                                ArrayList<NodeInfo> memberList = getMemberInfos();
+	                                                for (NodeInfo m : memberList) {
+	                                                    resetTimeoutAtCoord(m.id);
+	                                                    try {
+	                                                        doit(incomingSocks,
+																	memberList,
+																	m.id);
+	                                                    } finally {
+	                                                        incomingSocks.get(m.id).close();
+	                                                    }
+	                                                }
+	                                            } else {
+	                                            	broadcastMembershipChange(nodeId);
+	                                            }
+                                            } else if (!blockJoins) {
+                                            	doit(incomingSocks, getMemberInfos(), nodeId);
+                                            	broadcastMembershipChange(nodeId);
                                             }
-                                            new ObjectOutputStream(incoming.getOutputStream())
-                                                    .writeObject(im);
-                                        } finally {
-                                            incoming.close();
-                                        }
-                                    } catch (Exception ex) {
-                                        throw new RuntimeException(ex);
+                                    	} else if (capJoins && nodes.size() == numNodesHint) {
+                                    		Init im = new Init();
+                                    		im.src = myNid;
+                                    		im.id = -1;
+                                    		im.members = new ArrayList<NodeInfo>();
+                                    		sendit(incoming, im);
+                                    	}
                                     }
+                                } catch (Exception ex) {
+                                    err(ex);
+                                } finally {
+                                	try {
+                                		if (!blockJoins) incoming.close();
+                                	} catch (IOException ex) {
+                                		err(ex);
+                                	}
                                 }
-                            });
-                        }
+                            }
 
+							private void doit(
+									final Hashtable<Integer, Socket> incomingSocks,
+									ArrayList<NodeInfo> memberList,
+									int nid) throws IOException {
+								Init im = new Init();
+								im.id = nid;
+								im.src = myNid;
+								im.version = currentStateVersion;
+								im.members = memberList;
+								sendit(incomingSocks.get(nid), im);
+							}
+
+							private void sendit(
+									Socket socket, Init im) throws IOException {
+								DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+								new Serialization().serialize(im, dos);
+								dos.flush();
+							}
+                        });
                     }
                 } finally {
                     ss.close();
@@ -327,7 +354,11 @@ public class NeuRonNode extends Thread {
         } else {
             try {
                 Socket s;
+                long startTime = System.currentTimeMillis();
                 while (true) {
+                	if ((System.currentTimeMillis() - startTime) / 1000 > joinTimeLimit) {
+                		throw new PlannedException("exceeded join time limit; aborting");
+                	}
                     // Connect to the co-ordinator
                     try {
                         s = new Socket(coordinatorHost, basePort);
@@ -337,7 +368,6 @@ public class NeuRonNode extends Thread {
                         try {
                             Thread.sleep(1000);
                         } catch (InterruptedException ie) {
-
                         }
                     }
                 }
@@ -353,8 +383,11 @@ public class NeuRonNode extends Thread {
 
                     log("waiting for InitMsg");
                     Init im = (Init) new Serialization().deserialize(new DataInputStream(s.getInputStream()));
-                    assert im.id > 0;
-                    myNid = im.id;
+                    if (im.id == -1) {
+						throw new PlannedException("network is full; aborting");
+					}
+					myNid = im.id;
+                    logger = Logger.getLogger("node" + myNid);
                     currentStateVersion = im.version;
                     log("got from coord => " + im);
                     updateMembers(im.members);
@@ -365,6 +398,11 @@ public class NeuRonNode extends Thread {
                         throw new RuntimeException(ex);
                     }
                 }
+            } catch (PlannedException ex) {
+            	throw ex;
+            } catch (SocketException ex) {
+            	log(ex.getMessage());
+            	return;
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
@@ -409,6 +447,7 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }, 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
+                if (semAllJoined != null) semAllJoined.release();
             } catch (IOException ex) {
                 throw new RuntimeException(ex);
             }
@@ -602,7 +641,7 @@ public class NeuRonNode extends Thread {
     /**
      * a coordinator-only method
      */
-    private void addMember(int newNid, InetAddress addr, int port) {
+    private NodeInfo addMember(int newNid, InetAddress addr, int port) {
         log("adding new node: " + newNid);
         NodeInfo info = new NodeInfo();
         info.id = newNid;
@@ -610,20 +649,7 @@ public class NeuRonNode extends Thread {
         info.port = port;
         nodes.put(newNid, info);
         currentStateVersion++;
-        broadcastMembershipChange(newNid);
-    }
-
-    /**
-     * a coordinator-only method - for init in simulation only
-     */
-    private void addMemberWithoutBroadcast(int newNid, InetAddress addr, int port) {
-        log("adding new node: " + newNid);
-        NodeInfo info = new NodeInfo();
-        info.id = newNid;
-        info.addr = addr;
-        info.port = port;
-        nodes.put(newNid, info);
-        currentStateVersion++;
+        return info;
     }
 
     private ArrayList<Integer> memberNids() {
@@ -655,13 +681,17 @@ public class NeuRonNode extends Thread {
             }
         }
     }
+    
+    ArrayList<NodeInfo> getMemberInfos() {
+    	return new ArrayList<NodeInfo>(nodes.values());
+    }
 
     /**
      * a coordinator-only method
      */
     private void sendMembership(int nid) {
         Membership msg = new Membership();
-        msg.members = new ArrayList<NodeInfo>(nodes.values());
+        msg.members = getMemberInfos();
         sendObject(msg, nid);
     }
 
@@ -742,7 +772,7 @@ public class NeuRonNode extends Thread {
         // repopulateNeighborList();
     }
 
-    public static enum RoutingScheme { SIMPLE, SQRT, SQRT_NOFAILOVER, SQRT_RC_FAILOVER, SQRT_SPECIAL };
+    public static enum RoutingScheme { SIMPLE, SQRT, SQRT_SPECIAL };
     private final RoutingScheme scheme;
 
     private HashSet<GridNode> getNeighborList() {
@@ -763,34 +793,20 @@ public class NeuRonNode extends Thread {
                             GridNode neighbor = grid[r][x];
                             if (neighbor.isAlive && !ignored.contains(neighbor.id)) {
                                 neighborSet.add(neighbor);
-                            } else if (scheme != RoutingScheme.SQRT_NOFAILOVER) {
+                            } else {
                                 log("R node failover!");
                                 for (int i = 0; i < numRows; i++) {
                                     if ( (i != r) && ((grid[i][c].isAlive == false) ||  ignored.contains(grid[i][c].id)) ) {
                                         /* (r, x) and (i, c) can't be reached
                                          * (i, x) needs a failover R node
                                          */
-                                        boolean bFoundReplacement = false;
                                         for (int j = 0; j < numCols; j++) {
                                             if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) && !ignored.contains(grid[i][j].id)) {
                                                 PeeringRequest pr = new PeeringRequest();
                                                 sendObject(pr, grid[i][j].id);
                                                 neighborSet.add(grid[i][j]);
-                                                log("Failing over (Row) to node " + grid[i][j] + " as R node for node " + grid[i][x]);
-                                                bFoundReplacement = true;
+                                                log("Failing over to node " + grid[i][j] + " as R node for node " + grid[i][x]);
                                                 break;
-                                            }
-                                        }
-                                        if ((bFoundReplacement == false) && ((scheme == RoutingScheme.SQRT_RC_FAILOVER) || (scheme == RoutingScheme.SQRT_SPECIAL))) {
-                                            for (int j = 0; j < numRows; j++) {
-                                                if ( (grid[j][x].id != myNid) && (grid[j][x].isAlive == true) && !ignored.contains(grid[j][x].id)) {
-                                                    PeeringRequest pr = new PeeringRequest();
-                                                    sendObject(pr, grid[j][x].id);
-                                                    neighborSet.add(grid[j][x]);
-                                                    log("Failing over (Column) to node " + grid[j][x] + " as R node for node " + grid[i][x]);
-                                                    bFoundReplacement = true;
-                                                    break;
-                                                }
                                             }
                                         }
                                     }
@@ -1093,7 +1109,6 @@ public class NeuRonNode extends Thread {
                 //    everyone else this logic will have to be more complex
                 //	  (like check if the reco was better)
                 nextHopTable.put(r.dst, r.via);
-                log("Availability Count - can reach " + nextHopTable.size() + " of " + nodes.size() + "nodes in 1 hop.");
             }
         }
     }
@@ -1214,12 +1229,12 @@ class PeeringRequest extends Msg {
       class Serialization {
 
 
-
+    
 
       public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
 
-
+      
 else if (obj.getClass() == NodeInfo.class) {
 NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
 out.writeInt(casted.id);
@@ -1245,7 +1260,7 @@ out.writeInt(casted.version);
 else if (obj.getClass() == Init.class) {
 Init casted = (Init) obj; out.writeInt(4);
 out.writeInt(casted.id);
- out.writeInt(casted.members.size());
+ out.writeInt(casted.members.size()); 
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeInt(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -1256,7 +1271,7 @@ out.writeInt(casted.version);
 }
 else if (obj.getClass() == Membership.class) {
 Membership casted = (Membership) obj; out.writeInt(5);
- out.writeInt(casted.members.size());
+ out.writeInt(casted.members.size()); 
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeInt(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -1268,7 +1283,7 @@ out.writeInt(casted.version);
 }
 else if (obj.getClass() == RoutingRecs.class) {
 RoutingRecs casted = (RoutingRecs) obj; out.writeInt(6);
- out.writeInt(casted.recs.size());
+ out.writeInt(casted.recs.size()); 
 for (int i = 0; i < casted.recs.size(); i++) {
 out.writeInt(casted.recs.get(i).dst);
 out.writeInt(casted.recs.get(i).via);
@@ -1293,7 +1308,7 @@ out.writeInt(casted.version);
 }
 else if (obj.getClass() == Measurements.class) {
 Measurements casted = (Measurements) obj; out.writeInt(9);
- out.writeInt(casted.membershipList.size());
+ out.writeInt(casted.membershipList.size()); 
 for (int i = 0; i < casted.membershipList.size(); i++) {
 out.writeInt(casted.membershipList.get(i));
 }
@@ -1318,7 +1333,7 @@ out.writeInt(casted.version);
 
       public Object deserialize(DataInputStream in) throws IOException {
       switch (readInt(in)) {
-
+    
 case 0: { // NodeInfo
 NodeInfo obj;
 {
@@ -1336,12 +1351,12 @@ byte[] buf;
           buf = new byte[readInt(in)];
           in.read(buf);
 
-
+        
 }
 
         obj.addr = InetAddress.getByAddress(buf);
 
-
+        
 }
 }
 return obj;}
@@ -1380,12 +1395,12 @@ byte[] buf;
           buf = new byte[readInt(in)];
           in.read(buf);
 
-
+        
 }
 
         obj.addr = InetAddress.getByAddress(buf);
 
-
+        
 }
 {
 {
@@ -1423,12 +1438,12 @@ byte[] buf;
           buf = new byte[readInt(in)];
           in.read(buf);
 
-
+        
 }
 
         x.addr = InetAddress.getByAddress(buf);
 
-
+        
 }
 }
 obj.members.add(x);
@@ -1467,12 +1482,12 @@ byte[] buf;
           buf = new byte[readInt(in)];
           in.read(buf);
 
-
+        
 }
 
         x.addr = InetAddress.getByAddress(buf);
 
-
+        
 }
 }
 obj.members.add(x);
@@ -1543,12 +1558,12 @@ byte[] buf;
           buf = new byte[readInt(in)];
           in.read(buf);
 
-
+        
 }
 
         obj.info.addr = InetAddress.getByAddress(buf);
 
-
+        
 }
 }
 {

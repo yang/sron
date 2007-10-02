@@ -15,6 +15,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
+
+import edu.cmu.neuron2.NeuRonNode.PlannedException;
 
 public class RonTest {
 
@@ -43,7 +46,10 @@ public class RonTest {
         */
 
         RonTest rt = new RonTest();
-        rt.run();
+        try {
+        	rt.run();
+        } catch (PlannedException ex) {
+        }
     }
 
     public void run() throws Exception {
@@ -56,63 +62,74 @@ public class RonTest {
 
         final ExecutorService executor = Executors.newSingleThreadExecutor();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-
-        final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            public void run() {
-                for (NeuRonNode node : nodes) {
-                    node.quit();
-                }
-                executor.shutdown();
-            }
-        });
-        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
-        int nodeId = Integer.parseInt(props.getProperty("nodeId", "0"));
-        RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
-        String simData = props.getProperty("simData", "");
-
-        // InetAddress.getLocalHost() fails when # of nodes is large - hence optimizing
-        int basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
-        NodeInfo coordNode = new NodeInfo();
-        coordNode.id = 0;
-        String coordinatorHost;
-        try {
-            coordinatorHost = props.getProperty("coordinatorHost",
-                    InetAddress.getLocalHost().getHostAddress());
-            coordNode.addr = InetAddress.getByName(coordinatorHost);
-        } catch (UnknownHostException ex) {
-            throw new RuntimeException(ex);
-        }
-        coordNode.port = basePort;
-
-        switch (mode) {
-        case SIM:
-            InetAddress myCachedAddr;
-            try {
-                myCachedAddr = InetAddress.getLocalHost();
-            } catch (UnknownHostException ex) {
-                throw new RuntimeException(ex);
-            }
-
-            for (int i = 0; i <= numNodes; i++) {
-                NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
-                                                numNodes, semAllJoined, myCachedAddr,
-                                                coordinatorHost, coordNode);
-                node.start();
-                nodes.add(node);
-            }
-            semAllJoined.acquire();
-            System.out.println("All aboard !!!!!");
-            sim(simData, nodes, scheduler);
-            break;
-        case DIST:
-            NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
-                                            props, numNodes, semAllJoined, null,
-                                            coordinatorHost, coordNode);
-            node.start();
-            nodes.add(node);
-            break;
-        }
+        
+	        final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
+	        Runtime.getRuntime().addShutdownHook(new Thread() {
+	            public void run() {
+	                for (NeuRonNode node : nodes) {
+	                    node.quit();
+	                }
+	            }
+	        });
+	        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
+	        int nodeId = Integer.parseInt(props.getProperty("nodeId", "0"));
+	        RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
+	        String simData = props.getProperty("simData", "");
+	
+	        // InetAddress.getLocalHost() fails when # of nodes is large - hence optimizing
+	        int basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
+	        NodeInfo coordNode = new NodeInfo();
+	        coordNode.id = 0;
+	        String coordinatorHost;
+	        try {
+	            coordinatorHost = props.getProperty("coordinatorHost",
+	                    InetAddress.getLocalHost().getHostAddress());
+	            coordNode.addr = InetAddress.getByName(coordinatorHost);
+	        } catch (UnknownHostException ex) {
+	            throw new RuntimeException(ex);
+	        }
+	        coordNode.port = basePort;
+	
+	        switch (mode) {
+	        case SIM:
+	            InetAddress myCachedAddr;
+	            try {
+	                myCachedAddr = InetAddress.getLocalHost();
+	            } catch (UnknownHostException ex) {
+	                throw new RuntimeException(ex);
+	            }
+	
+	            for (int i = 0; i <= numNodes; i++) {
+	                NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
+	                                                numNodes, i == 0 ? semAllJoined : null, myCachedAddr,
+	                                                coordinatorHost, coordNode);
+	                node.start();
+	                nodes.add(node);
+	            }
+	            semAllJoined.acquire();
+	            if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
+	            System.out.println("All aboard !!!!!");
+	            sim(simData, nodes, scheduler);
+	            break;
+	        case DIST:
+	            NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
+	                                            props, numNodes, semAllJoined, null,
+	                                            coordinatorHost, coordNode);
+	            node.start();
+	            nodes.add(node);
+	            semAllJoined.acquire();
+	            if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
+	            break;
+	        }
+    		Logger.getLogger("").info("scheduling total time watchdog");
+	        scheduler.schedule(new Runnable() {
+	        	public void run() {
+	        		Logger.getLogger("").info("total time is up");
+	            	scheduler.shutdown();
+	            	executor.shutdown();
+	        		System.exit(0);
+	        	}
+	        }, Integer.parseInt(props.getProperty("totalTime", "60")), TimeUnit.SECONDS);
     }
 
     private void sim(String datafile, final List<NeuRonNode> nodes,
