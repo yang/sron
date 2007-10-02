@@ -4,6 +4,8 @@ import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
@@ -69,11 +71,33 @@ public class RonTest {
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         String simData = props.getProperty("simData", "");
 
+        // InetAddress.getLocalHost() fails when # of nodes is large - hence optimizing
+        int basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
+        NodeInfo coordNode = new NodeInfo();
+        coordNode.id = 0;
+        String coordinatorHost;
+        try {
+            coordinatorHost = props.getProperty("coordinatorHost",
+                    InetAddress.getLocalHost().getHostAddress());
+            coordNode.addr = InetAddress.getByName(coordinatorHost);
+        } catch (UnknownHostException ex) {
+            throw new RuntimeException(ex);
+        }
+        coordNode.port = basePort;
+
         switch (mode) {
         case SIM:
+            InetAddress myCachedAddr;
+            try {
+                myCachedAddr = InetAddress.getLocalHost();
+            } catch (UnknownHostException ex) {
+                throw new RuntimeException(ex);
+            }
+
             for (int i = 0; i <= numNodes; i++) {
-                NeuRonNode node = new NeuRonNode(i, executor, scheduler,
-                                                props, numNodes, semAllJoined);
+                NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
+                                                numNodes, semAllJoined, myCachedAddr,
+                                                coordinatorHost, coordNode);
                 node.start();
                 nodes.add(node);
             }
@@ -83,7 +107,8 @@ public class RonTest {
             break;
         case DIST:
             NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
-                                            props, numNodes, semAllJoined);
+                                            props, numNodes, semAllJoined, null,
+                                            coordinatorHost, coordNode);
             node.start();
             nodes.add(node);
             break;
@@ -103,13 +128,23 @@ public class RonTest {
                 double stopTime = Double.parseDouble(parts[3]);
                 final ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
                     public void run() {
-                        nodes.get(dst).ignore(src);
+                        //nodes.get(dst).ignore(src);
+                        for (NeuRonNode node : nodes) {
+                            if (node.myNid == src) {
+                                node.ignore(dst);
+                            }
+                        }
                     }
                 }, (long) (startTime * 1000), TimeUnit.MILLISECONDS);
                 scheduler.schedule(new Runnable() {
                     public void run() {
                         if (!future.cancel(false)) {
-                            nodes.get(dst).unignore(src);
+                            for (NeuRonNode node : nodes) {
+                                if (node.myNid == src) {
+                                    //nodes.get(dst).unignore(src);
+                                    node.unignore(dst);
+                                }
+                            }
                         }
                     }
                 }, (long) (stopTime * 1000), TimeUnit.MILLISECONDS);

@@ -69,7 +69,7 @@ class LabelFilter implements Filter {
 public class NeuRonNode extends Thread {
     private final ExecutorService executor;
     private final ScheduledExecutorService scheduler;
-    private int myNid; // TODO non final
+    public int myNid;
     private final boolean isCoordinator;
     private final String coordinatorHost;
     private final int basePort;
@@ -92,12 +92,17 @@ public class NeuRonNode extends Thread {
     public final int neighborBroadcastPeriod;
     public final int probePeriod;
 
-    private NodeInfo coordNode = new NodeInfo();
+    //private NodeInfo coordNode = new NodeInfo();
+    private NodeInfo coordNode;
     private DatagramSocket sendSocket;
 
     private RunMode mode;
     private final int numNodesHint;
     private Semaphore semAllJoined;
+
+    private InetAddress myCachedAddr;
+    private ArrayList<Integer> cachedMemberNids; // sorted list of members
+    private int cachedMemberNidsVersion;
 
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         if (props.getProperty(labelSet) != null) {
@@ -108,15 +113,31 @@ public class NeuRonNode extends Thread {
     }
 
     public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler,
-                        Properties props, int num_nodes_hint, Semaphore sem_all_joined) {
+                        Properties props, int num_nodes_hint, Semaphore sem_all_joined,
+                        InetAddress my_cached_addr, String coordinator_host, NodeInfo coord_node) {
+
+        if ((coord_node == null) || (coord_node.addr == null)){
+            throw new RuntimeException("coordNode is null!");
+        }
+
         myNid = id;
-        coordNode.id = 0;
         currentStateVersion = 0;
+        cachedMemberNidsVersion = -1;
+        cachedMemberNids = new ArrayList<Integer>();
+
+        coordinatorHost = coordinator_host;
+        coordNode = coord_node;
 
         basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "10"));
-        probePeriod = Integer.parseInt(props.getProperty("probePeriod", "5"));
+
+        // for simulations we can safely reduce the probing frequency, or even turn it off
+        if (mode == RunMode.SIM) {
+            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
+        } else {
+            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "60"));
+        }
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 5));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
 
@@ -146,14 +167,7 @@ public class NeuRonNode extends Thread {
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
-        try {
-            coordinatorHost = props.getProperty("coordinatorHost",
-                    InetAddress.getLocalHost().getHostAddress());
-            coordNode.addr = InetAddress.getByName(coordinatorHost);
-        } catch (UnknownHostException ex) {
-            throw new RuntimeException(ex);
-        }
-        coordNode.port = basePort;
+
         this.executor = executor;
         this.scheduler = scheduler;
         probeTable = null;
@@ -165,6 +179,17 @@ public class NeuRonNode extends Thread {
 
         numNodesHint = num_nodes_hint;
         semAllJoined = sem_all_joined;
+
+        if (my_cached_addr == null) {
+            try {
+                myCachedAddr = InetAddress.getLocalHost();
+            } catch (UnknownHostException ex) {
+                throw new RuntimeException(ex);
+            }
+        }
+        else {
+            myCachedAddr = my_cached_addr;
+        }
     }
 
     private void log(String msg) {
@@ -321,7 +346,7 @@ public class NeuRonNode extends Thread {
                     // talk to coordinator
                     log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
                     Join msg = new Join();
-                    msg.addr = InetAddress.getLocalHost();
+                    msg.addr = myCachedAddr;
                     DataOutputStream dos = new DataOutputStream(s.getOutputStream());
                     new Serialization().serialize(msg, dos);
                     dos.flush();
@@ -347,9 +372,9 @@ public class NeuRonNode extends Thread {
             // now start accepting pings and other msgs,
             // also start sending probes and sending out other msgs
             try {
-                new DatagramAcceptor().bind(new InetSocketAddress(InetAddress.getLocalHost(), basePort + myNid),
+                new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, basePort + myNid),
                                             new Receiver(), cfg);
-                log("server started on " + InetAddress.getLocalHost() + ":" + (basePort + myNid));
+                log("server started on " + myCachedAddr + ":" + (basePort + myNid));
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
                         synchronized (NeuRonNode.this) {
@@ -465,7 +490,7 @@ public class NeuRonNode extends Thread {
                 throws Exception {
             Msg msg = deserialize(obj);
             synchronized (NeuRonNode.this) {
-                if (ignored.contains(msg.src)) return;
+                //if (ignored.contains(msg.src)) return;
                 log("recv." + msg.getClass().getSimpleName(), "from " + msg.src);
                 if (msg.version > currentStateVersion) {
                     if (msg instanceof Membership) {
@@ -602,6 +627,17 @@ public class NeuRonNode extends Thread {
     }
 
     private ArrayList<Integer> memberNids() {
+        if ((cachedMemberNidsVersion < currentStateVersion) || (cachedMemberNids == null) ) {
+            //log("NEW cachedMemberNids (" + cachedMemberNidsVersion + ", " + currentStateVersion);
+            cachedMemberNidsVersion = currentStateVersion;
+            cachedMemberNids = new ArrayList<Integer>(nodes.keySet());
+            Collections.sort(cachedMemberNids);
+            //log("Size = " + cachedMemberNids.size());
+        }
+        return cachedMemberNids;
+    }
+
+    private ArrayList<Integer> getUncachedmemberNids() {
         ArrayList<Integer> nids = new ArrayList<Integer>(nodes.keySet());
         Collections.sort(nids);
         return nids;
@@ -642,7 +678,7 @@ public class NeuRonNode extends Thread {
     }
 
     private void updateMembers(List<NodeInfo> newNodes) {
-        List<Integer> oldNids = memberNids();
+        List<Integer> oldNids = getUncachedmemberNids();
         nodes.clear();
 
         for (NodeInfo node : newNodes) {
@@ -725,20 +761,21 @@ public class NeuRonNode extends Thread {
                     for (int x = 0; x < numCols; x++) {
                         if (grid[r][x].id != myNid) {
                             GridNode neighbor = grid[r][x];
-                            if (neighbor.isAlive) {
+                            if (neighbor.isAlive && !ignored.contains(neighbor.id)) {
                                 neighborSet.add(neighbor);
                             } else {
                                 log("R node failover!");
                                 for (int i = 0; i < numRows; i++) {
-                                    if ( (i != r) && (grid[i][c].isAlive == false) ) {
+                                    if ( (i != r) && ((grid[i][c].isAlive == false) ||  ignored.contains(grid[i][c].id)) ) {
                                         /* (r, x) and (i, c) can't be reached
                                          * (i, x) needs a failover R node
                                          */
                                         for (int j = 0; j < numCols; j++) {
-                                            if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) ) {
+                                            if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) && !ignored.contains(grid[i][j].id)) {
                                                 PeeringRequest pr = new PeeringRequest();
                                                 sendObject(pr, grid[i][j].id);
                                                 neighborSet.add(grid[i][j]);
+                                                log("Failing over to node " + grid[i][j] + " as R node for node " + grid[i][x]);
                                                 break;
                                             }
                                         }
@@ -972,6 +1009,7 @@ public class NeuRonNode extends Thread {
 
     private void sendObject(final Msg o, int nid) {
         if (nid != myNid) {
+            if (ignored.contains(nid)) return;
             NodeInfo node = nid == 0 ? coordNode : nodes.get(nid);
             o.src = myNid;
             o.version = currentStateVersion;
@@ -1115,15 +1153,6 @@ class GridNode {
 
 
 
-
-
-
-
-
-
-
-
-
 class NodeInfo  {
 int id;
 int port;
@@ -1168,10 +1197,13 @@ class PeeringRequest extends Msg {
 }
 
       class Serialization {
+
+
     
 
       public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
+
       
 else if (obj.getClass() == NodeInfo.class) {
 NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
@@ -1288,10 +1320,12 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
+
         
 }
 
         obj.addr = InetAddress.getByAddress(buf);
+
         
 }
 }
@@ -1330,10 +1364,12 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
+
         
 }
 
         obj.addr = InetAddress.getByAddress(buf);
+
         
 }
 {
@@ -1371,10 +1407,12 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
+
         
 }
 
         x.addr = InetAddress.getByAddress(buf);
+
         
 }
 }
@@ -1413,10 +1451,12 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
+
         
 }
 
         x.addr = InetAddress.getByAddress(buf);
+
         
 }
 }
@@ -1487,10 +1527,12 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
+
         
 }
 
         obj.info.addr = InetAddress.getByAddress(buf);
+
         
 }
 }
@@ -1662,3 +1704,4 @@ return obj;}
 }
     }*/
     }
+
