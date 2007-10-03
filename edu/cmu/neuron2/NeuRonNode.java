@@ -102,6 +102,8 @@ public class NeuRonNode extends Thread {
     private final boolean blockJoins;
     private final boolean capJoins;
     private final int joinTimeLimit; // seconds
+    
+    private final FileHandler fh;
 
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         if (props.getProperty(labelSet) != null) {
@@ -123,7 +125,7 @@ public class NeuRonNode extends Thread {
         currentStateVersion = 0;
         cachedMemberNidsVersion = -1;
         cachedMemberNids = new ArrayList<Integer>();
-        joinTimeLimit = Integer.parseInt(props.getProperty("joinTimeLimit", "300")); // wait up to 5 minutes by default
+        joinTimeLimit = Integer.parseInt(props.getProperty("joinTimeLimit", "10")); // wait up to 10 secs by default for coord to be available
         
         blockJoins = Boolean.valueOf(props.getProperty("blockJoins", "true"));
         capJoins = Boolean.valueOf(props.getProperty("capJoins", "true"));
@@ -161,7 +163,7 @@ public class NeuRonNode extends Thread {
 
         try {
             String logFileBase = props.getProperty("logFileBase", "%t/scaleron-log-");
-            FileHandler fh = new FileHandler(logFileBase + myNid);
+            fh = new FileHandler(logFileBase + myNid);
             fh.setFormatter(fmt);
             createLabelFilter(props, "fileLogFilter", fh);
             logger.addHandler(fh);
@@ -227,20 +229,20 @@ public class NeuRonNode extends Thread {
     }
     
     public static final class PlannedException extends RuntimeException {
-    	public PlannedException(String msg) {
-    		super(msg);
-    	}
+        public PlannedException(String msg) {
+            super(msg);
+        }
     }
     
-    public final AtomicReference<PlannedException> failure = new AtomicReference<PlannedException>();
+    public final AtomicReference<Exception> failure = new AtomicReference<Exception>();
     public void run() {
-    	try {
-    		run2();
-    	} catch (PlannedException ex) {
-    		log(ex.getMessage());
-    		failure.set(ex);
-    		if (semAllJoined != null) semAllJoined.release();
-    	}
+        try {
+            run2();
+        } catch (Exception ex) {
+            log(ex.getMessage());
+            failure.set(ex);
+            if (semAllJoined != null) semAllJoined.release();
+        }
     }
 
     public void run2() {
@@ -277,71 +279,70 @@ public class NeuRonNode extends Thread {
                                     Join msg = (Join) new Serialization().deserialize(new DataInputStream(incoming.getInputStream()));
 
                                     synchronized (NeuRonNode.this) {
-                                		incomingSocks.put(nodeId, incoming);
-                                    	if (!capJoins || nodes.size() < numNodesHint) {
+                                        incomingSocks.put(nodeId, incoming);
+                                        if (!capJoins || nodes.size() < numNodesHint) {
                                             addMember(nodeId, msg.addr, basePort + nodeId);
                                             if (nodes.size() == numNodesHint) {
-                                            	semAllJoined.release();
-                                            	doQuit.set(true);
+                                                semAllJoined.release();
                                             }
                                             if (nodes.size() >= numNodesHint) {
-	                                            if (blockJoins) {
-	                                                // time to broadcast ims to everyone
-	                                                ArrayList<NodeInfo> memberList = getMemberInfos();
-	                                                for (NodeInfo m : memberList) {
-	                                                    resetTimeoutAtCoord(m.id);
-	                                                    try {
-	                                                        doit(incomingSocks,
-																	memberList,
-																	m.id);
-	                                                    } finally {
-	                                                        incomingSocks.get(m.id).close();
-	                                                    }
-	                                                }
-	                                            } else {
-	                                            	broadcastMembershipChange(nodeId);
-	                                            }
+                                                if (blockJoins) {
+                                                    // time to broadcast ims to everyone
+                                                    ArrayList<NodeInfo> memberList = getMemberInfos();
+                                                    for (NodeInfo m : memberList) {
+                                                        resetTimeoutAtCoord(m.id);
+                                                        try {
+                                                            doit(incomingSocks,
+                                                                    memberList,
+                                                                    m.id);
+                                                        } finally {
+                                                            incomingSocks.get(m.id).close();
+                                                        }
+                                                    }
+                                                } else {
+                                                    broadcastMembershipChange(nodeId);
+                                                }
                                             } else if (!blockJoins) {
-                                            	doit(incomingSocks, getMemberInfos(), nodeId);
-                                            	broadcastMembershipChange(nodeId);
+                                                doit(incomingSocks, getMemberInfos(), nodeId);
+                                                broadcastMembershipChange(nodeId);
                                             }
-                                    	} else if (capJoins && nodes.size() == numNodesHint) {
-                                    		Init im = new Init();
-                                    		im.src = myNid;
-                                    		im.id = -1;
-                                    		im.members = new ArrayList<NodeInfo>();
-                                    		sendit(incoming, im);
-                                    	}
+                                        } else if (capJoins && nodes.size() == numNodesHint) {
+                                            Init im = new Init();
+                                            im.src = myNid;
+                                            im.id = -1;
+                                            im.members = new ArrayList<NodeInfo>();
+                                            sendit(incoming, im);
+                                        }
                                     }
                                 } catch (Exception ex) {
                                     err(ex);
                                 } finally {
-                                	try {
-                                		if (!blockJoins) incoming.close();
-                                	} catch (IOException ex) {
-                                		err(ex);
-                                	}
+                                    try {
+                                        if (!blockJoins) incoming.close();
+                                    } catch (IOException ex) {
+                                        err(ex);
+                                    }
                                 }
                             }
 
-							private void doit(
-									final Hashtable<Integer, Socket> incomingSocks,
-									ArrayList<NodeInfo> memberList,
-									int nid) throws IOException {
-								Init im = new Init();
-								im.id = nid;
-								im.src = myNid;
-								im.version = currentStateVersion;
-								im.members = memberList;
-								sendit(incomingSocks.get(nid), im);
-							}
+                            private void doit(
+                                    final Hashtable<Integer, Socket> incomingSocks,
+                                    ArrayList<NodeInfo> memberList,
+                                    int nid) throws IOException {
+                                Init im = new Init();
+                                im.id = nid;
+                                im.src = myNid;
+                                im.version = currentStateVersion;
+                                im.members = memberList;
+                                sendit(incomingSocks.get(nid), im);
+                            }
 
-							private void sendit(
-									Socket socket, Init im) throws IOException {
-								DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-								new Serialization().serialize(im, dos);
-								dos.flush();
-							}
+                            private void sendit(
+                                    Socket socket, Init im) throws IOException {
+                                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+                                new Serialization().serialize(im, dos);
+                                dos.flush();
+                            }
                         });
                     }
                 } finally {
@@ -356,9 +357,9 @@ public class NeuRonNode extends Thread {
                 Socket s;
                 long startTime = System.currentTimeMillis();
                 while (true) {
-                	if ((System.currentTimeMillis() - startTime) / 1000 > joinTimeLimit) {
-                		throw new PlannedException("exceeded join time limit; aborting");
-                	}
+                    if ((System.currentTimeMillis() - startTime) / 1000 > joinTimeLimit) {
+                        throw new PlannedException("exceeded join time limit; aborting");
+                    }
                     // Connect to the co-ordinator
                     try {
                         s = new Socket(coordinatorHost, basePort);
@@ -384,10 +385,11 @@ public class NeuRonNode extends Thread {
                     log("waiting for InitMsg");
                     Init im = (Init) new Serialization().deserialize(new DataInputStream(s.getInputStream()));
                     if (im.id == -1) {
-						throw new PlannedException("network is full; aborting");
-					}
-					myNid = im.id;
+                        throw new PlannedException("network is full; aborting");
+                    }
+                    myNid = im.id;
                     logger = Logger.getLogger("node" + myNid);
+                    logger.addHandler(fh);
                     currentStateVersion = im.version;
                     log("got from coord => " + im);
                     updateMembers(im.members);
@@ -399,10 +401,10 @@ public class NeuRonNode extends Thread {
                     }
                 }
             } catch (PlannedException ex) {
-            	throw ex;
+                throw ex;
             } catch (SocketException ex) {
-            	log(ex.getMessage());
-            	return;
+                log(ex.getMessage());
+                return;
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
@@ -683,7 +685,7 @@ public class NeuRonNode extends Thread {
     }
     
     ArrayList<NodeInfo> getMemberInfos() {
-    	return new ArrayList<NodeInfo>(nodes.values());
+        return new ArrayList<NodeInfo>(nodes.values());
     }
 
     /**
@@ -1107,7 +1109,7 @@ public class NeuRonNode extends Thread {
                 // They are out R-points. Trust them and update your entry blindly.
                 // For the algorithm where the R-points only send recos about
                 //    everyone else this logic will have to be more complex
-                //	  (like check if the reco was better)
+                //    (like check if the reco was better)
                 nextHopTable.put(r.dst, r.via);
             }
         }
