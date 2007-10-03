@@ -27,7 +27,7 @@ clean: $(CLASS_DIR)
 test: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
 	./run.bash
 
-scaleron.jar: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
+scaleron.jar: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class $(CLASS_DIR)/edu/cmu/neuron2/FailureDataGen.class
 	jar cf scaleron.jar -C $(CLASS_DIR) .
 
 jar: scaleron.jar
