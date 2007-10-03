@@ -10,6 +10,7 @@ schemes = ["simple"]
 for scheme in schemes
   File.open("#{datadir}/#{scheme}.dat", "w") do |out|
     # for numNodes in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    # for numNodes in [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200]
     for numNodes in [3, 7]
       subdir = "#{datadir}/#{scheme}/#{numNodes}"
       puts subdir
