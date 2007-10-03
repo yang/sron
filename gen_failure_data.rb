@@ -26,4 +26,4 @@ run = ARGV[2]
 
 #puts "----->  failureRate = #{failureRate}%, numNodes = #{numNodes}, run = #{run}"
 system("mkdir -p #{FAILURE_DATA_DIR}/f_#{failureRate}/n_#{numNodes}/r_#{run}");
-system("java edu.cmu.neuron2.FailureDataGen #{failureRate} #{numNodes} 60 > #{FAILURE_DATA_DIR}/f_#{failureRate}/n_#{numNodes}/r_#{run}/failure_data.dat")
+system("java -cp scaleron.jar edu.cmu.neuron2.FailureDataGen #{failureRate} #{numNodes} 60 > #{FAILURE_DATA_DIR}/f_#{failureRate}/n_#{numNodes}/r_#{run}/failure_data.dat")
