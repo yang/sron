@@ -82,6 +82,7 @@ public class NeuRonNode extends Thread {
     private int numCols, numRows;
     private final HashSet<GridNode> overflowNeighbors = new HashSet<GridNode>();
     private Hashtable<Integer, Integer> nextHopTable = new Hashtable<Integer, Integer>();
+    private Hashtable<Integer, HashSet<Integer>> nextHopOptions = new Hashtable<Integer, HashSet<Integer>>();
     private final IoServiceConfig cfg = new DatagramAcceptorConfig();
 
     private int currentStateVersion;
@@ -402,8 +403,9 @@ public class NeuRonNode extends Thread {
                     if (im.id == -1) {
                         throw new PlannedException("network is full; aborting");
                     }
+                    System.out.println("Had nodeId = " + myNid + ". New nodeId = " + im.id);
                     myNid = im.id;
-                    logger = Logger.getLogger("node" + myNid);
+                    logger = Logger.getLogger("node_" + myNid);
                     logger.addHandler(fh);
                     currentStateVersion = im.version;
                     log("got from coord => " + im);
@@ -746,12 +748,17 @@ public class NeuRonNode extends Thread {
         }
 
         Hashtable<Integer, Integer> newNextHopTable = new Hashtable<Integer, Integer>(nodes.size());
+        Hashtable<Integer, HashSet<Integer>> newNextHopOptions = new Hashtable<Integer, HashSet<Integer>>(nodes.size());
+
         for (NodeInfo node : newNodes) {
             if (node.id != myNid) {
                 Integer nextHop = nextHopTable.get(node.id);
                 if (nextHop == null) {
                     // new node !
                     newNextHopTable.put(node.id, myNid);
+                    HashSet<Integer> nextHops = new HashSet<Integer>();
+                    nextHops.add(myNid);
+                    newNextHopOptions.put(node.id, nextHops);
                 }
                 else {
                     // check if this old next hop is in the new membership list
@@ -763,13 +770,30 @@ public class NeuRonNode extends Thread {
                         // the next hop vanaished. i am next hop to this node now
                         newNextHopTable.put(node.id, myNid);
                     }
+                    // of all the possible next hop options to the node,
+                    // remove those that are dead.
+                    HashSet<Integer> nextHops = nextHopOptions.get(node.id);
+                    if (nextHops != null) {
+                       for (Iterator<Integer> it = nextHops.iterator (); it.hasNext (); ) {
+                            Integer someNextHop = it.next();
+                            if (nodes.get(someNextHop) == null) {
+                                it.remove ();
+                            }
+                       }
+                       newNextHopOptions.put(node.id, nextHops);
+                    } else {
+                        HashSet<Integer> nh = new HashSet<Integer>();
+                        nextHops.add(myNid);
+                        newNextHopOptions.put(node.id, nh);
+                    }
                 }
             }
             else {
-                newNextHopTable.put(myNid, myNid);
+                //newNextHopTable.put(myNid, myNid);
             }
         }
         nextHopTable = newNextHopTable; // forget about the old one
+        nextHopOptions = newNextHopOptions;
 
         repopulateGrid();
         repopulateProbeTable(oldNids);
@@ -1155,9 +1179,25 @@ public class NeuRonNode extends Thread {
                 //    everyone else this logic will have to be more complex
                 //    (like check if the reco was better)
                 nextHopTable.put(r.dst, r.via);
-                log("Availability Count - can reach " + nextHopTable.size() + " of " + nodes.size() + "nodes in 1 hop.");
+                HashSet<Integer> nextHops = nextHopOptions.get(r.dst);
+                if (nextHops == null) {
+                	nextHops = new HashSet<Integer>();
+                	nextHopOptions.put(r.dst, nextHops);
+                }
+                nextHops.add(r.via);
             }
         }
+
+        int reachable = 0;
+        for (int nid : nextHopTable.keySet()) {
+                int nextHop = nextHopTable.get(nid);
+                if (nextHop != myNid) {
+                    if (!ignored.contains(nextHop)) reachable++;
+                } else if (!ignored.contains(nid)) {
+                    reachable++;
+                }
+        }
+        log("Reachability Count = " + reachable + " of " + (nodes.size() - 1) + " nodes in 1 or less hops.");
     }
 
     public void quit() {
