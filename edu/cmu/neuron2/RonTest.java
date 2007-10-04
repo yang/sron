@@ -64,7 +64,7 @@ public class RonTest {
 
         final ExecutorService executor = Executors.newSingleThreadExecutor();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-        
+
         final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
         Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
@@ -156,6 +156,9 @@ public class RonTest {
                             if (node.myNid == src) {
                                 node.ignore(dst);
                             }
+                            else if (node.myNid == dst) {
+                                node.ignore(src);
+                            }
                         }
                     }
                 }, (long) (startTime * 1000), TimeUnit.MILLISECONDS);
@@ -166,6 +169,9 @@ public class RonTest {
                                 if (node.myNid == src) {
                                     //nodes.get(dst).unignore(src);
                                     node.unignore(dst);
+                                }
+                                else if (node.myNid == dst) {
+                                    node.unignore(src);
                                 }
                             }
                         }

@@ -158,7 +158,7 @@ public class NeuRonNode extends Thread {
         } else {
             probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
         }
-        timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 5));
+        timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
 
         Formatter fmt = new Formatter() {
@@ -528,6 +528,8 @@ public class NeuRonNode extends Thread {
     public synchronized void ignore(int nid) {
         log("ignoring " + nid);
         ignored.add(nid);
+        ArrayList<Integer> sorted_nids = memberNids();
+        probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
     }
 
     public synchronized void unignore(int nid) {
@@ -650,13 +652,15 @@ public class NeuRonNode extends Thread {
                                 pong.time = ping.time;
                                 sendObject(pong, ping.src);
                             } else if (msg instanceof Pong) {
-                                Pong pong = (Pong) msg;
-                                resetTimeoutAtNode(pong.src);
-                                int rtt = (int) (System.currentTimeMillis() - pong.time);
-                                log("latency", "one way latency to " + pong.src + " = " + rtt/2);
-                                ArrayList<Integer> sortedNids = memberNids();
-                                probeTable[sortedNids.indexOf(myNid)][sortedNids.indexOf(pong.src)]
-                                                                        = rtt / 2;
+                                if (!ignored.contains(msg.src)) {
+                                    Pong pong = (Pong) msg;
+                                    resetTimeoutAtNode(pong.src);
+                                    int rtt = (int) (System.currentTimeMillis() - pong.time);
+                                    log("latency", "one way latency to " + pong.src + " = " + rtt/2);
+                                    ArrayList<Integer> sortedNids = memberNids();
+                                    probeTable[sortedNids.indexOf(myNid)][sortedNids.indexOf(pong.src)]
+                                                                            = rtt / 2;
+                                }
                             } else if (msg instanceof PeeringRequest) {
                                 PeeringRequest pr = (PeeringRequest) msg;
                                 GridNode newNeighbor = new GridNode();
@@ -732,6 +736,8 @@ public class NeuRonNode extends Thread {
                                 }
                             }
                         }
+                        ArrayList<Integer> sorted_nids = memberNids();
+                        probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
                     }
                 }
             }, timeout, TimeUnit.SECONDS);
@@ -1114,7 +1120,7 @@ public class NeuRonNode extends Thread {
                     }
                     Rec rec = new Rec();
                     rec.dst = dst.id;
-                    rec.via = mini;
+                    rec.via = sortedNids.get(mini);
                     recs.add(rec);
                 }
             }
@@ -1156,12 +1162,12 @@ public class NeuRonNode extends Thread {
                         long cur = probeTable[srcOffset][i] + probeTable[dstOffset][i];
                         if (cur < min) {
                             min = cur;
-                            mini = sortedNids.get(i);
+                            mini = i;
                         }
                     }
                     Rec rec = new Rec();
                     rec.dst = dst.id;
-                    rec.via = mini;
+                    rec.via = sortedNids.get(mini);
                     recs.add(rec);
                 }
             }
@@ -1275,6 +1281,9 @@ public class NeuRonNode extends Thread {
                 // everyone else this logic will have to be more complex
                 // (like check if the reco was better)
                 nextHopTable.put(r.dst, r.via);
+
+                if (r.via == 0) log("%%%%%%%%%%%%%%%%%%%%%% " + r.dst + " " + r.via);
+
                 HashSet<Integer> nextHops = nextHopOptions.get(r.dst);
                 if (nextHops == null) {
                     nextHops = new HashSet<Integer>();
@@ -1290,10 +1299,15 @@ public class NeuRonNode extends Thread {
         for (int nid : nextHopTable.keySet()) {
             int nextHop = nextHopTable.get(nid);
             if (nextHop != myNid) {
-                if (!ignored.contains(nextHop))
+                if (!ignored.contains(nextHop)) {
                     reachable++;
+                } else {
+                    //log("@@@ not considering " + nextHop);
+                }
             } else if (!ignored.contains(nid)) {
                 reachable++;
+            } else {
+                //log("$$$ not considering " + nextHop);
             }
 
             HashSet<Integer> nhSet = nextHopOptions.get(nid);
