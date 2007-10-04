@@ -28,6 +28,14 @@ test: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
 	./run.bash
 
 scaleron.jar: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class $(CLASS_DIR)/edu/cmu/neuron2/FailureDataGen.class
-	jar cf scaleron.jar -C $(CLASS_DIR) .
+	jar cf scaleron.jar -C $(CLASS_DIR) edu
+
+$(CLASS_DIR)/genio/GenIo.class: gen.scala $(CLASS_DIR)
+	fsc -d $(CLASS_DIR) gen.scala
 
 jar: scaleron.jar
+
+genio: $(CLASS_DIR)/genio/GenIo.class
+
+gen: $(CLASS_DIR)/genio/GenIo.class
+	scala -classpath $(CLASS_DIR) genio.GenIo

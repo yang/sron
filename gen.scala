@@ -1,10 +1,10 @@
-package edu.cmu.neuron2
+package genio
 
 /**
  * recursive types not welcome here. punks
  */
 
-object gen {
+object GenIo {
   case class Type(name: String, fieldStr: String, children: Array[Type]) {
     val fields =
       if (fieldStr.length > 0)
@@ -16,7 +16,7 @@ object gen {
   val types = Array(
     Type("NodeInfo",         "int id, int port, InetAddress addr"),
     Type("Rec",              "int dst, int via"),
-    Type("Msg",              "int src, int version", Array(
+    Type("Msg",              "int src, int version, int session", Array(
       Type("Join",           "InetAddress addr"),
       Type("Init",           "int id, ArrayList<NodeInfo> members"),
       Type("Membership",     "ArrayList<NodeInfo> members, int numNodes"),
