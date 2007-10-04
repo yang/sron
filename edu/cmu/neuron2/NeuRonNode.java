@@ -85,6 +85,8 @@ public class NeuRonNode extends Thread {
     private Hashtable<Integer, HashSet<Integer>> nextHopOptions = new Hashtable<Integer, HashSet<Integer>>();
     private final IoServiceConfig cfg = new DatagramAcceptorConfig();
 
+    private final Hashtable<InetAddress, Integer> addr2id = new Hashtable<InetAddress, Integer>();
+
     private int currentStateVersion;
 
     public final int neighborBroadcastPeriod;
@@ -113,7 +115,9 @@ public class NeuRonNode extends Thread {
 
     private final int membershipBroadcastPeriod;
 
-    private static final String defaultLabelSet = "send.Ping recv.Ping send.Pong recv.Pong send.Measurement send.RoutingRecs";
+    private static final String defaultLabelSet = "send.Ping recv.Ping stale.Ping send.Pong recv.Pong stale.Pong send.Measurement send.RoutingRecs";
+
+    private final Hashtable<Integer,Long> lastSentMbr = new Hashtable<Integer,Long>();
 
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         String[] labels = props.getProperty(labelSet, defaultLabelSet).split(" ");
@@ -208,6 +212,23 @@ public class NeuRonNode extends Thread {
         else {
             myCachedAddr = myAddr;
         }
+
+        myPort = basePort + myNid;
+    }
+
+    private final int myPort;
+
+    private void handleInit(Init im) {
+        if (im.id == -1) {
+            throw new PlannedException("network is full; aborting");
+        }
+        System.out.println("Had nodeId = " + myNid + ". New nodeId = " + im.id);
+        myNid = im.id;
+        logger = Logger.getLogger("node_" + myNid);
+        logger.addHandler(fh);
+        currentStateVersion = im.version;
+        log("got from coord => Init " + im.id);
+        updateMembers(im.members);
     }
 
     private String bytes2string(byte[] buf) {
@@ -273,15 +294,34 @@ public class NeuRonNode extends Thread {
         }
     }
 
+    private int nextNodeId = 1;
+
+
+    //private Runnable makeSafeRunnable(Runnable r) {
+    //    return new Runnable() {
+    //        public void run() {
+    //            try {
+    //                run();
+    //            } catch (Exception ex) {
+    //                err(ex);
+    //            }
+    //        }
+    //    };
+    //}
+
     public void run2() {
         if (isCoordinator) {
             try {
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
-                        synchronized (NeuRonNode.this) {
-                            log("checkpoint: " + nodes.size() + " nodes");
-                            printMembers();
-                            printGrid();
+                        try {
+                            synchronized (NeuRonNode.this) {
+                                log("checkpoint: " + nodes.size() + " nodes");
+                                printMembers();
+                                printGrid();
+                            }
+                        } catch (Exception ex) {
+                            err(ex);
                         }
                     }
                 }, dumpPeriod, dumpPeriod, TimeUnit.SECONDS);
@@ -302,7 +342,6 @@ public class NeuRonNode extends Thread {
                         }
                     }, 1, membershipBroadcastPeriod, TimeUnit.SECONDS);
                 }
-                int nextNodeId = 1;
                 // do not remove this for now
                 Thread.sleep(2000);
                 new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
@@ -324,7 +363,11 @@ public class NeuRonNode extends Thread {
                         } catch (SocketTimeoutException ex) {
                             continue;
                         }
-                        final int nodeId = nextNodeId++;
+                        final int nodeId;
+                        // this is OK since nid orderings are irrelevant
+                        synchronized (NeuRonNode.this) {
+                            nodeId = nextNodeId++;
+                        }
 
                         executor.submit(new Runnable() {
                             public void run() {
@@ -334,7 +377,7 @@ public class NeuRonNode extends Thread {
                                     synchronized (NeuRonNode.this) {
                                         incomingSocks.put(nodeId, incoming);
                                         if (!capJoins || nodes.size() < numNodesHint) {
-                                            addMember(nodeId, msg.addr, basePort + nodeId, msg.src);
+                                            addMember(nodeId, msg.addr, msg.port, msg.src);
                                             if (nodes.size() == numNodesHint) {
                                                 semAllJoined.release();
                                             }
@@ -406,16 +449,20 @@ public class NeuRonNode extends Thread {
             try {
                 Socket s;
                 long startTime = System.currentTimeMillis();
+                int count = 0;
                 while (true) {
-                    if ((System.currentTimeMillis() - startTime) / 1000 > joinTimeLimit) {
-                        throw new PlannedException("exceeded join time limit; aborting");
+                    if (count++ > joinTimeLimit) {
+                        throw new PlannedException("exceeded join try limit; aborting");
                     }
+                    // if ((System.currentTimeMillis() - startTime) / 1000 > joinTimeLimit) {
+                    //     throw new PlannedException("exceeded join time limit; aborting");
+                    // }
                     // Connect to the co-ordinator
                     try {
                         s = new Socket(coordinatorHost, basePort);
                         break;
                     } catch (Exception ex) {
-                        log("couldn't connect to coord, retrying in 1 sec");
+                        log("couldn't connect to coord, retrying in 1 sec: " + ex.getMessage());
                         try {
                             Thread.sleep(1000);
                         } catch (InterruptedException ie) {
@@ -429,6 +476,7 @@ public class NeuRonNode extends Thread {
                     Join msg = new Join();
                     msg.addr = myCachedAddr;
                     msg.src = myNid; // informs coord of orig id
+                    msg.port = myPort;
                     DataOutputStream dos = new DataOutputStream(s.getOutputStream());
                     new Serialization().serialize(msg, dos);
                     dos.flush();
@@ -443,16 +491,7 @@ public class NeuRonNode extends Thread {
                     byte[] buf = minibaos.toByteArray();
                     try {
                         Init im = (Init) new Serialization().deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
-                        if (im.id == -1) {
-                            throw new PlannedException("network is full; aborting");
-                        }
-                        System.out.println("Had nodeId = " + myNid + ". New nodeId = " + im.id);
-                        myNid = im.id;
-                        logger = Logger.getLogger("node_" + myNid);
-                        logger.addHandler(fh);
-                        currentStateVersion = im.version;
-                        log("got from coord => " + im);
-                        updateMembers(im.members);
+                        handleInit(im);
                     } catch (Exception ex) {
                         err("got buffer: " + bytes2string(buf));
                         throw ex;
@@ -479,7 +518,7 @@ public class NeuRonNode extends Thread {
             // now start accepting pings and other msgs,
             // also start sending probes and sending out other msgs
             try {
-                new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, basePort + myNid),
+                new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, myPort),
                                             new Receiver(), cfg);
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
                 scheduler.scheduleAtFixedRate(new Runnable() {
@@ -541,7 +580,11 @@ public class NeuRonNode extends Thread {
         log("pinging");
         Ping ping = new Ping();
         ping.time = System.currentTimeMillis();
-        ping.info = nodes.get(myNid);
+        NodeInfo tmp = nodes.get(myNid);
+        ping.info = new NodeInfo();
+        ping.info.id = origNid; // note that the ping info uses the original id
+        ping.info.addr = tmp.addr;
+        ping.info.port = tmp.port;
         for (int nid : nodes.keySet())
             if (nid != myNid)
                 sendObject(ping, nid);
@@ -591,18 +634,42 @@ public class NeuRonNode extends Thread {
                                     msg.src + " (oid " + id2id.get(msg.src) + ", "
                                     + id2name.get(msg.src) + ")");
                             resetTimeoutAtCoord(msg.src);
+                            if (msg.version < currentStateVersion) {
+                                log("updating stale membership");
+                                sendMembership(msg.src);
+                            }
                             if (msg instanceof Ping) {
                                 // ignore the ping
-                            } else if (msg instanceof MemberPoll) {
-                                sendMembership(msg.src);
                             } else {
                                 throw new Exception("can't handle that message type");
                             }
                         } else {
-                            log("obsolete." + msg.getClass().getSimpleName(), "");
-                            // XXX LEFT OFF HERE
-                            // addMember(msg.src);
-                            // broadcastMembershipChange(msg.src);
+                            if ((!capJoins || nodes.size() < numNodesHint) &&
+                                    msg instanceof Ping) {
+                                Ping ping = (Ping) msg;
+                                log("obsolete." + ping.getClass().getSimpleName(),
+                                        "from '" + ping.src + "' " + ping.info.addr.getHostName());
+
+                                Integer mappedId = addr2id.get(ping.info.addr);
+                                if (mappedId == null) {
+                                    int nid = nextNodeId++;
+                                    addMember(nid, ping.info.addr,
+                                            ping.info.port, ping.info.id);
+
+                                    Init im = new Init();
+                                    im.id = nid;
+                                    im.src = myNid;
+                                    im.version = currentStateVersion;
+                                    im.members = getMemberInfos();
+                                    sendObject(im, nid);
+
+                                    broadcastMembershipChange(nid);
+                                } else {
+                                    sendMembership(mappedId);
+                                }
+                            } else {
+                                log("obsolete." + msg.getClass().getSimpleName(), "from '" + msg.src + "'");
+                            }
                         }
                     } else {
                         // log("recv." + msg.getClass().getSimpleName(), "ignored from " + msg.src + " session " + msg.session);
@@ -625,20 +692,44 @@ public class NeuRonNode extends Thread {
                 Msg msg = deserialize(obj);
                 if (msg == null) return;
                 synchronized (NeuRonNode.this) {
-                    if (nodes.containsKey(msg.src) && msg.session == sessionId) {
+                    if ((msg.src == 0 || nodes.containsKey(msg.src)) &&
+                            msg.session == sessionId || msg instanceof Ping) {
                         //if (ignored.contains(msg.src)) return;
                         log("recv." + msg.getClass().getSimpleName(), "from " + msg.src);
+
+                        // always act on pings/pong (for rtt collection)
+
+                        if (msg instanceof Ping) {
+                            Ping ping = ((Ping) msg);
+                            Pong pong = new Pong();
+                            pong.time = ping.time;
+                            sendObject(pong, ping.info);
+                        } else if (msg instanceof Pong) {
+                            Pong pong = (Pong) msg;
+                            int rtt = (int) (System.currentTimeMillis() - pong.time);
+                            log("latency", "one way latency to " + pong.src + " = " + rtt/2);
+                        }
+
+                        // for other messages, make sure their state version is
+                        // the same as ours
+
                         if (msg.version > currentStateVersion) {
                             if (msg instanceof Membership) {
                                 currentStateVersion = msg.version;
-                                updateMembers(((Membership) msg).members);
+                                Membership m = (Membership) msg;
+                                myNid = m.yourId;
+                                updateMembers(m.members);
                             } else {
                                 // i am out of date - request latest membership
-                                sendObject(new MemberPoll(), 0);
+                                // sendObject(new MemberPoll(), 0);
+                                // commented out - membership updates now
+                                // implicitly handled via pings
                             }
                         } else if (msg.version == currentStateVersion) {
                             if (msg instanceof Membership) {
-                                updateMembers(((Membership) msg).members);
+                                Membership m = (Membership) msg;
+                                myNid = m.yourId;
+                                updateMembers(m.members);
                             } else if (msg instanceof Measurements) {
                                 log(((Measurements) msg).toString());
                                 updateNetworkState((Measurements) msg);
@@ -647,16 +738,12 @@ public class NeuRonNode extends Thread {
                                 handleRecommendation(((RoutingRecs) msg).recs);
                                 log(toStringNextHopTable());
                             } else if (msg instanceof Ping) {
-                                Ping ping = ((Ping) msg);
-                                Pong pong = new Pong();
-                                pong.time = ping.time;
-                                sendObject(pong, ping.src);
+                                // nothing to do, already handled above
                             } else if (msg instanceof Pong) {
                                 if (!ignored.contains(msg.src)) {
                                     Pong pong = (Pong) msg;
                                     resetTimeoutAtNode(pong.src);
                                     int rtt = (int) (System.currentTimeMillis() - pong.time);
-                                    log("latency", "one way latency to " + pong.src + " = " + rtt/2);
                                     ArrayList<Integer> sortedNids = memberNids();
                                     probeTable[sortedNids.indexOf(myNid)][sortedNids.indexOf(pong.src)]
                                                                             = rtt / 2;
@@ -667,11 +754,13 @@ public class NeuRonNode extends Thread {
                                 newNeighbor.id = pr.src;
                                 newNeighbor.isAlive = true;
                                 overflowNeighbors.add(newNeighbor);
+                            } else if (msg instanceof Init) {
+                                handleInit((Init) msg);
                             } else {
                                 throw new Exception("can't handle that message type");
                             }
                         } else {
-                            warn("stale msg from " + msg.src);
+                            log("stale." + msg.getClass().getSimpleName(), "from " + msg.src + " version " + msg.version);
                         }
                     } else {
                         // log("ignored." + msg.getClass().getSimpleName(), "ignored from " + msg.src + " session " + msg.session);
@@ -703,8 +792,12 @@ public class NeuRonNode extends Thread {
             }
             ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
                 public void run() {
-                    synchronized (NeuRonNode.this) {
-                        removeMember(nid);
+                    try {
+                        synchronized (NeuRonNode.this) {
+                            removeMember(nid);
+                        }
+                    } catch (Exception ex) {
+                        err(ex);
                     }
                 }
             }, timeout, TimeUnit.SECONDS);
@@ -727,17 +820,21 @@ public class NeuRonNode extends Thread {
             }
             ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
                 public void run() {
-                    synchronized (NeuRonNode.this) {
-                        // O(n)
-                        for (int i = 0; i < numRows; i++) {
-                            for (int j = 0; j < numCols; j++) {
-                                if (grid[i][j].id == nid) {
-                                    grid[i][j].isAlive = false;
+                    try {
+                        synchronized (NeuRonNode.this) {
+                            // O(n)
+                            for (int i = 0; i < numRows; i++) {
+                                for (int j = 0; j < numCols; j++) {
+                                    if (grid[i][j].id == nid) {
+                                        grid[i][j].isAlive = false;
+                                    }
                                 }
                             }
+                            ArrayList<Integer> sorted_nids = memberNids();
+                            probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
                         }
-                        ArrayList<Integer> sorted_nids = memberNids();
-                        probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
+                    } catch (Exception ex) {
+                        err(ex);
                     }
                 }
             }, timeout, TimeUnit.SECONDS);
@@ -756,6 +853,7 @@ public class NeuRonNode extends Thread {
         nodes.put(newNid, info);
         id2id.put(newNid, origId);
         id2name.put(newNid, addr.getHostName());
+        addr2id.put(addr, newNid);
         log("adding new node: " + newNid + " oid " + origId + " name " +
                 id2name.get(newNid));
         currentStateVersion++;
@@ -805,9 +903,19 @@ public class NeuRonNode extends Thread {
 
     /**
      * a coordinator-only method
+     *
+     * throttles these messages so they're sent at most once per second
      */
     private void sendMembership(int nid) {
         Membership msg = new Membership();
+        msg.yourId = nid;
+        //Long last = lastSentMbr.get(nid);
+        //if (last == null || System.currentTimeMillis() - last.longValue() > 1000) {
+        //    scheduler.schedule();
+        //} else {
+        //    scheduler.schedule();
+        //}
+        //lastSentMbr.put(msg.src, msg.id);
         msg.members = getMemberInfos();
         sendObject(msg, nid);
     }
@@ -820,7 +928,9 @@ public class NeuRonNode extends Thread {
     private void removeMember(int nid) {
         log("removing dead node " + nid + " oid " + id2id.get(nid) + " " +
                 id2name.get(nid));
-        nodes.remove(nid);
+        NodeInfo info = nodes.remove(nid);
+        Integer mid = addr2id.remove(info.addr);
+        assert mid != null;
         currentStateVersion++;
         broadcastMembershipChange(nid);
     }
@@ -884,6 +994,7 @@ public class NeuRonNode extends Thread {
         repopulateGrid();
         repopulateProbeTable(oldNids);
         // printGrid();
+        log("new state version: " + currentStateVersion);
         log(toStringNeighborList());
     }
 
@@ -1071,7 +1182,7 @@ public class NeuRonNode extends Thread {
         String s = "members:";
         for (NodeInfo node : nodes.values()) {
             s += "\n  " + node.id + " oid " + id2id.get(node.id) + " " +
-                id2name.get(node.id);
+                id2name.get(node.id) + " " + node.port;
         }
         log(s);
     }
@@ -1200,36 +1311,56 @@ public class NeuRonNode extends Thread {
         log("Sending recommendations to neighbors, total " + totalSize + " bytes. " + toStringNeighborList());
     }
 
+//    /**
+//     * caches names
+//     */
+//    private String id2nm(int nid, String addr) {
+//        if (nid >= 0) {
+//            String name = id2name.get(nid);
+//            if (name == null) {
+//                NodeInfo node = nodes.get(nid);
+//                if (node != null) {
+//                    name = node.getHostName();
+//                    id2name.put(nid, name);
+//                } else {
+//                    id2name.put(nid, node);
+//                }
+//            }
+//            return name;
+//        } else {
+//            return addr;
+//        }
+//    }
+
     private Serialization senderSer = new Serialization();
 
-    private int sendObject(final Msg o, int nid) {
-        if (nid != myNid) {
-            if (ignored.contains(nid)) return 0;
-            NodeInfo node = nid == 0 ? coordNode : nodes.get(nid);
-            o.src = myNid;
-            o.version = currentStateVersion;
-            o.session = sessionId;
+    private int sendObject(final Msg o, InetAddress addr, int port, int nid) {
+        o.src = myNid;
+        o.version = currentStateVersion;
+        o.session = sessionId;
 
-            try {
-                /*
-                 * note that it's unsafe to re-use these output streams - at
-                 * least, i don't know how (reset() is insufficient)
-                 */
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                senderSer.serialize(o, new DataOutputStream(baos));
-                byte[] buf = baos.toByteArray();
-                log("send." + o.getClass().getSimpleName(), "to " + nid + " len " + buf.length);
-                sendSocket.send(new DatagramPacket(buf, buf.length, node.addr, node.port));
-                return buf.length;
-            } catch (Exception ex) {
-                throw new RuntimeException(ex);
-            }
-
+        try {
             /*
-              leave this commented region here
-              This is was not a good idea because it would open a new socket every time.
-              we now instead use a single socket (sendSocket).
-            */
+             * note that it's unsafe to re-use these output streams - at
+             * least, i don't know how (reset() is insufficient)
+             */
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            senderSer.serialize(o, new DataOutputStream(baos));
+            byte[] buf = baos.toByteArray();
+            String who = nid >= 0 ? "" + nid : (addr + ":" + port);
+            log("send." + o.getClass().getSimpleName(),
+                    "to " + who + " len " + buf.length);
+            sendSocket.send(new DatagramPacket(buf, buf.length, addr, port));
+            return buf.length;
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
+
+        /*
+          leave this commented region here
+          This is was not a good idea because it would open a new socket every time.
+          we now instead use a single socket (sendSocket).
+        */
 //            new DatagramConnector().connect(new InetSocketAddress(node.addr, node.port),
 //                                            new IoHandlerAdapter() {
 //                @Override
@@ -1237,8 +1368,19 @@ public class NeuRonNode extends Thread {
 //                    session.write(o); // TODO :: need custom serialization
 //                }
 //            }, cfg);
-        }
-        return 0;
+    }
+
+    private int sendObject(final Msg o, NodeInfo info, int nid) {
+        return sendObject(o, info.addr, info.port, nid);
+    }
+
+    private int sendObject(final Msg o, NodeInfo info) {
+        return sendObject(o, info, -1);
+    }
+
+    private int sendObject(final Msg o, int nid) {
+        return nid != myNid && !ignored.contains(nid) ?
+            sendObject(o, nid == 0 ? coordNode : nodes.get(nid), nid) : 0;
     }
 
     private void broadcastMeasurements() {
@@ -1398,597 +1540,579 @@ class GridNode {
 
 
 
-class NodeInfo {
-    int id;
 
-    int port;
 
-    InetAddress addr;
+class NodeInfo  {
+int id;
+int port;
+InetAddress addr;
 }
-
-class Rec {
-    int dst;
-
-    int via;
+class Rec  {
+int dst;
+int via;
 }
-
-class Msg {
-    int src;
-
-    int version;
-
-    int session;
+class Msg  {
+int src;
+int version;
+int session;
 }
-
 class Join extends Msg {
-    InetAddress addr;
+InetAddress addr;
+int port;
 }
-
 class Init extends Msg {
-    int id;
-
-    ArrayList<NodeInfo> members;
+int id;
+ArrayList<NodeInfo> members;
 }
-
 class Membership extends Msg {
-    ArrayList<NodeInfo> members;
-
-    int numNodes;
+ArrayList<NodeInfo> members;
+int numNodes;
+int yourId;
 }
-
 class RoutingRecs extends Msg {
-    ArrayList<Rec> recs;
+ArrayList<Rec> recs;
 }
-
 class Ping extends Msg {
-    long time;
-
-    NodeInfo info;
+long time;
+NodeInfo info;
 }
-
 class Pong extends Msg {
-    long time;
+long time;
 }
-
 class Measurements extends Msg {
-    //ArrayList<Integer> membershipList;
-
-    long[] probeTable;
+long[] probeTable;
 }
-
 class MemberPoll extends Msg {
 }
-
 class PeeringRequest extends Msg {
 }
 
-class Serialization {
+      class Serialization {
+    
 
-    public void serialize(Object obj, DataOutputStream out) throws IOException {
-        if (false) {
-        }
+      public void serialize(Object obj, DataOutputStream out) throws IOException {
+      if (false) {}
+      
+else if (obj.getClass() == NodeInfo.class) {
+NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
+out.writeInt(casted.id);
+out.writeInt(casted.port);
+byte[] buf = casted.addr.getAddress();out.writeInt(buf.length);out.write(buf);
+}
+else if (obj.getClass() == Rec.class) {
+Rec casted = (Rec) obj; out.writeInt(1);
+out.writeInt(casted.dst);
+out.writeInt(casted.via);
+}
+else if (obj.getClass() == Msg.class) {
+Msg casted = (Msg) obj; out.writeInt(2);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == Join.class) {
+Join casted = (Join) obj; out.writeInt(3);
+byte[] buf = casted.addr.getAddress();out.writeInt(buf.length);out.write(buf);
+out.writeInt(casted.port);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == Init.class) {
+Init casted = (Init) obj; out.writeInt(4);
+out.writeInt(casted.id);
+ out.writeInt(casted.members.size()); 
+for (int i = 0; i < casted.members.size(); i++) {
+out.writeInt(casted.members.get(i).id);
+out.writeInt(casted.members.get(i).port);
+byte[] buf = casted.members.get(i).addr.getAddress();out.writeInt(buf.length);out.write(buf);
+}
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == Membership.class) {
+Membership casted = (Membership) obj; out.writeInt(5);
+ out.writeInt(casted.members.size()); 
+for (int i = 0; i < casted.members.size(); i++) {
+out.writeInt(casted.members.get(i).id);
+out.writeInt(casted.members.get(i).port);
+byte[] buf = casted.members.get(i).addr.getAddress();out.writeInt(buf.length);out.write(buf);
+}
+out.writeInt(casted.numNodes);
+out.writeInt(casted.yourId);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == RoutingRecs.class) {
+RoutingRecs casted = (RoutingRecs) obj; out.writeInt(6);
+ out.writeInt(casted.recs.size()); 
+for (int i = 0; i < casted.recs.size(); i++) {
+out.writeInt(casted.recs.get(i).dst);
+out.writeInt(casted.recs.get(i).via);
+}
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == Ping.class) {
+Ping casted = (Ping) obj; out.writeInt(7);
+out.writeLong(casted.time);
+out.writeInt(casted.info.id);
+out.writeInt(casted.info.port);
+byte[] buf = casted.info.addr.getAddress();out.writeInt(buf.length);out.write(buf);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == Pong.class) {
+Pong casted = (Pong) obj; out.writeInt(8);
+out.writeLong(casted.time);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == Measurements.class) {
+Measurements casted = (Measurements) obj; out.writeInt(9);
+out.writeInt(casted.probeTable.length);
+for (int i = 0; i < casted.probeTable.length; i++) {
+out.writeLong(casted.probeTable[i]);
+}
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == MemberPoll.class) {
+MemberPoll casted = (MemberPoll) obj; out.writeInt(10);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+else if (obj.getClass() == PeeringRequest.class) {
+PeeringRequest casted = (PeeringRequest) obj; out.writeInt(11);
+out.writeInt(casted.src);
+out.writeInt(casted.version);
+out.writeInt(casted.session);
+}
+}
 
-        else if (obj.getClass() == NodeInfo.class) {
-            NodeInfo casted = (NodeInfo) obj;
-            out.writeInt(0);
-            out.writeInt(casted.id);
-            out.writeInt(casted.port);
-            byte[] buf = casted.addr.getAddress();
-            out.writeInt(buf.length);
-            out.write(buf);
-        } else if (obj.getClass() == Rec.class) {
-            Rec casted = (Rec) obj;
-            out.writeInt(1);
-            out.writeInt(casted.dst);
-            out.writeInt(casted.via);
-        } else if (obj.getClass() == Msg.class) {
-            Msg casted = (Msg) obj;
-            out.writeInt(2);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == Join.class) {
-            Join casted = (Join) obj;
-            out.writeInt(3);
-            byte[] buf = casted.addr.getAddress();
-            out.writeInt(buf.length);
-            out.write(buf);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == Init.class) {
-            Init casted = (Init) obj;
-            out.writeInt(4);
-            out.writeInt(casted.id);
-            out.writeInt(casted.members.size());
-            for (int i = 0; i < casted.members.size(); i++) {
-                out.writeInt(casted.members.get(i).id);
-                out.writeInt(casted.members.get(i).port);
-                byte[] buf = casted.members.get(i).addr.getAddress();
-                out.writeInt(buf.length);
-                out.write(buf);
-            }
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == Membership.class) {
-            Membership casted = (Membership) obj;
-            out.writeInt(5);
-            out.writeInt(casted.members.size());
-            for (int i = 0; i < casted.members.size(); i++) {
-                out.writeInt(casted.members.get(i).id);
-                out.writeInt(casted.members.get(i).port);
-                byte[] buf = casted.members.get(i).addr.getAddress();
-                out.writeInt(buf.length);
-                out.write(buf);
-            }
-            out.writeInt(casted.numNodes);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == RoutingRecs.class) {
-            RoutingRecs casted = (RoutingRecs) obj;
-            out.writeInt(6);
-            out.writeInt(casted.recs.size());
-            for (int i = 0; i < casted.recs.size(); i++) {
-                out.writeInt(casted.recs.get(i).dst);
-                out.writeInt(casted.recs.get(i).via);
-            }
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == Ping.class) {
-            Ping casted = (Ping) obj;
-            out.writeInt(7);
-            out.writeLong(casted.time);
-            out.writeInt(casted.info.id);
-            out.writeInt(casted.info.port);
-            byte[] buf = casted.info.addr.getAddress();
-            out.writeInt(buf.length);
-            out.write(buf);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == Pong.class) {
-            Pong casted = (Pong) obj;
-            out.writeInt(8);
-            out.writeLong(casted.time);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == Measurements.class) {
-            Measurements casted = (Measurements) obj;
-            out.writeInt(9);
-            /*
-            out.writeInt(casted.membershipList.size());
-            for (int i = 0; i < casted.membershipList.size(); i++) {
-                out.writeInt(casted.membershipList.get(i));
-            }
-            */
-            out.writeInt(casted.probeTable.length);
-            for (int i = 0; i < casted.probeTable.length; i++) {
-                out.writeLong(casted.probeTable[i]);
-            }
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == MemberPoll.class) {
-            MemberPoll casted = (MemberPoll) obj;
-            out.writeInt(10);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        } else if (obj.getClass() == PeeringRequest.class) {
-            PeeringRequest casted = (PeeringRequest) obj;
-            out.writeInt(11);
-            out.writeInt(casted.src);
-            out.writeInt(casted.version);
-            out.writeInt(casted.session);
-        }
-    }
+      public Object deserialize(DataInputStream in) throws IOException {
+      switch (readInt(in)) {
+    
+case 0: { // NodeInfo
+NodeInfo obj;
+{
+obj = new NodeInfo();
+{
+obj.id = readInt(in);
+}
+{
+obj.port = readInt(in);
+}
+{
+byte[] buf;
+{
 
-    public Object deserialize(DataInputStream in) throws IOException {
-        switch (readInt(in)) {
+          buf = new byte[readInt(in)];
+          in.read(buf);
+        
+}
 
-        case 0: { // NodeInfo
-            NodeInfo obj;
-            {
-                obj = new NodeInfo();
-                {
-                    obj.id = readInt(in);
-                }
-                {
-                    obj.port = readInt(in);
-                }
-                {
-                    byte[] buf;
-                    {
+        obj.addr = InetAddress.getByAddress(buf);
+        
+}
+}
+return obj;}
+case 1: { // Rec
+Rec obj;
+{
+obj = new Rec();
+{
+obj.dst = readInt(in);
+}
+{
+obj.via = readInt(in);
+}
+}
+return obj;}
+case 2: { // Msg
+Msg obj;
+{
+obj = new Msg();
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+return obj;}
+case 3: { // Join
+Join obj;
+{
+obj = new Join();
+{
+byte[] buf;
+{
 
-                        buf = new byte[readInt(in)];
-                        in.read(buf);
+          buf = new byte[readInt(in)];
+          in.read(buf);
+        
+}
 
-                    }
+        obj.addr = InetAddress.getByAddress(buf);
+        
+}
+{
+obj.port = readInt(in);
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 4: { // Init
+Init obj;
+{
+obj = new Init();
+{
+obj.id = readInt(in);
+}
+{
+obj.members = new ArrayList<NodeInfo>();
+for (int i = 0, len = readInt(in); i < len; i++) {
+NodeInfo x;
+{
+x = new NodeInfo();
+{
+x.id = readInt(in);
+}
+{
+x.port = readInt(in);
+}
+{
+byte[] buf;
+{
 
-                    obj.addr = InetAddress.getByAddress(buf);
+          buf = new byte[readInt(in)];
+          in.read(buf);
+        
+}
 
-                }
-            }
-            return obj;
-        }
-        case 1: { // Rec
-            Rec obj;
-            {
-                obj = new Rec();
-                {
-                    obj.dst = readInt(in);
-                }
-                {
-                    obj.via = readInt(in);
-                }
-            }
-            return obj;
-        }
-        case 2: { // Msg
-            Msg obj;
-            {
-                obj = new Msg();
-                {
-                    obj.src = readInt(in);
-                }
-                {
-                    obj.version = readInt(in);
-                }
-                {
-                    obj.session = readInt(in);
-                }
-            }
-            return obj;
-        }
-        case 3: { // Join
-            Join obj;
-            {
-                obj = new Join();
-                {
-                    byte[] buf;
-                    {
+        x.addr = InetAddress.getByAddress(buf);
+        
+}
+}
+obj.members.add(x);
+}
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 5: { // Membership
+Membership obj;
+{
+obj = new Membership();
+{
+obj.members = new ArrayList<NodeInfo>();
+for (int i = 0, len = readInt(in); i < len; i++) {
+NodeInfo x;
+{
+x = new NodeInfo();
+{
+x.id = readInt(in);
+}
+{
+x.port = readInt(in);
+}
+{
+byte[] buf;
+{
 
-                        buf = new byte[readInt(in)];
-                        in.read(buf);
+          buf = new byte[readInt(in)];
+          in.read(buf);
+        
+}
 
-                    }
+        x.addr = InetAddress.getByAddress(buf);
+        
+}
+}
+obj.members.add(x);
+}
+}
+{
+obj.numNodes = readInt(in);
+}
+{
+obj.yourId = readInt(in);
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 6: { // RoutingRecs
+RoutingRecs obj;
+{
+obj = new RoutingRecs();
+{
+obj.recs = new ArrayList<Rec>();
+for (int i = 0, len = readInt(in); i < len; i++) {
+Rec x;
+{
+x = new Rec();
+{
+x.dst = readInt(in);
+}
+{
+x.via = readInt(in);
+}
+}
+obj.recs.add(x);
+}
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 7: { // Ping
+Ping obj;
+{
+obj = new Ping();
+{
+obj.time = in.readLong();
+}
+{
+obj.info = new NodeInfo();
+{
+obj.info.id = readInt(in);
+}
+{
+obj.info.port = readInt(in);
+}
+{
+byte[] buf;
+{
 
-                    obj.addr = InetAddress.getByAddress(buf);
+          buf = new byte[readInt(in)];
+          in.read(buf);
+        
+}
 
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 4: { // Init
-            Init obj;
-            {
-                obj = new Init();
-                {
-                    obj.id = readInt(in);
-                }
-                {
-                    obj.members = new ArrayList<NodeInfo>();
-                    for (int i = 0, len = readInt(in); i < len; i++) {
-                        NodeInfo x;
-                        {
-                            x = new NodeInfo();
-                            {
-                                x.id = readInt(in);
-                            }
-                            {
-                                x.port = readInt(in);
-                            }
-                            {
-                                byte[] buf;
-                                {
+        obj.info.addr = InetAddress.getByAddress(buf);
+        
+}
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 8: { // Pong
+Pong obj;
+{
+obj = new Pong();
+{
+obj.time = in.readLong();
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 9: { // Measurements
+Measurements obj;
+{
+obj = new Measurements();
+{
+obj.probeTable = new long[readInt(in)];
+for (int i = 0; i < obj.probeTable.length; i++) {
+{
+obj.probeTable[i] = in.readLong();
+}
+}
+}
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 10: { // MemberPoll
+MemberPoll obj;
+{
+obj = new MemberPoll();
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
+case 11: { // PeeringRequest
+PeeringRequest obj;
+{
+obj = new PeeringRequest();
+{
+{
+obj.src = readInt(in);
+}
+{
+obj.version = readInt(in);
+}
+{
+obj.session = readInt(in);
+}
+}
+}
+return obj;}
 
-                                    buf = new byte[readInt(in)];
-                                    in.read(buf);
-
-                                }
-
-                                x.addr = InetAddress.getByAddress(buf);
-
-                            }
-                        }
-                        obj.members.add(x);
-                    }
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 5: { // Membership
-            Membership obj;
-            {
-                obj = new Membership();
-                {
-                    obj.members = new ArrayList<NodeInfo>();
-                    for (int i = 0, len = readInt(in); i < len; i++) {
-                        NodeInfo x;
-                        {
-                            x = new NodeInfo();
-                            {
-                                x.id = readInt(in);
-                            }
-                            {
-                                x.port = readInt(in);
-                            }
-                            {
-                                byte[] buf;
-                                {
-
-                                    buf = new byte[readInt(in)];
-                                    in.read(buf);
-
-                                }
-
-                                x.addr = InetAddress.getByAddress(buf);
-
-                            }
-                        }
-                        obj.members.add(x);
-                    }
-                }
-                {
-                    obj.numNodes = readInt(in);
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 6: { // RoutingRecs
-            RoutingRecs obj;
-            {
-                obj = new RoutingRecs();
-                {
-                    obj.recs = new ArrayList<Rec>();
-                    for (int i = 0, len = readInt(in); i < len; i++) {
-                        Rec x;
-                        {
-                            x = new Rec();
-                            {
-                                x.dst = readInt(in);
-                            }
-                            {
-                                x.via = readInt(in);
-                            }
-                        }
-                        obj.recs.add(x);
-                    }
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 7: { // Ping
-            Ping obj;
-            {
-                obj = new Ping();
-                {
-                    obj.time = in.readLong();
-                }
-                {
-                    obj.info = new NodeInfo();
-                    {
-                        obj.info.id = readInt(in);
-                    }
-                    {
-                        obj.info.port = readInt(in);
-                    }
-                    {
-                        byte[] buf;
-                        {
-
-                            buf = new byte[readInt(in)];
-                            in.read(buf);
-
-                        }
-
-                        obj.info.addr = InetAddress.getByAddress(buf);
-
-                    }
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 8: { // Pong
-            Pong obj;
-            {
-                obj = new Pong();
-                {
-                    obj.time = in.readLong();
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 9: { // Measurements
-            Measurements obj;
-            {
-                obj = new Measurements();
-                /*
-                {
-                    obj.membershipList = new ArrayList<Integer>();
-                    for (int i = 0, len = readInt(in); i < len; i++) {
-                        Integer x;
-                        {
-                            x = readInt(in);
-                        }
-                        obj.membershipList.add(x);
-                    }
-                }
-                */
-                {
-                    obj.probeTable = new long[readInt(in)];
-                    for (int i = 0; i < obj.probeTable.length; i++) {
-                        {
-                            obj.probeTable[i] = in.readLong();
-                        }
-                    }
-                }
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 10: { // MemberPoll
-            MemberPoll obj;
-            {
-                obj = new MemberPoll();
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-        case 11: { // PeeringRequest
-            PeeringRequest obj;
-            {
-                obj = new PeeringRequest();
-                {
-                    {
-                        obj.src = readInt(in);
-                    }
-                    {
-                        obj.version = readInt(in);
-                    }
-                    {
-                        obj.session = readInt(in);
-                    }
-                }
-            }
-            return obj;
-        }
-
-        default:
-            throw new RuntimeException("unknown obj type");
-        }
-    }
+    default:throw new RuntimeException("unknown obj type");}}
 
     private byte[] readBuffer = new byte[4];
 
     public int readInt(DataInputStream dis) throws IOException {
-        dis.readFully(readBuffer, 0, 4);
-        return (((int) (readBuffer[0] & 255) << 24)
-                + ((readBuffer[1] & 255) << 16) + ((readBuffer[2] & 255) << 8) + ((readBuffer[3] & 255) << 0));
+      dis.readFully(readBuffer, 0, 4);
+      return (
+        ((int)(readBuffer[0] & 255) << 24) +
+        ((readBuffer[1] & 255) << 16) +
+        ((readBuffer[2] & 255) <<  8) +
+        ((readBuffer[3] & 255) <<  0));
     }
 
     /*
-     * public static void main(String[] args) throws IOException { {
-     * ByteArrayOutputStream baos = new ByteArrayOutputStream();
-     * DataOutputStream out = new DataOutputStream(baos); Pong pong = new
-     * Pong(); pong.src = 2; pong.version = 3; pong.time = 4; serialize(pong,
-     * out); byte[] buf = baos.toByteArray(); System.out.println(buf.length);
-     * Object obj = deserialize(new DataInputStream(new
-     * ByteArrayInputStream(buf))); System.out.println(obj); }
-     *  { ByteArrayOutputStream baos = new ByteArrayOutputStream();
-     * DataOutputStream out = new DataOutputStream(baos);
-     *
-     * Measurements m = new Measurements(); m.src = 2; m.version = 3;
-     * m.membershipList = new ArrayList<Integer>(); m.membershipList.add(4);
-     * m.membershipList.add(5); m.membershipList.add(6); m.ProbeTable = new
-     * long[5]; m.ProbeTable[1] = 7; m.ProbeTable[2] = 8; m.ProbeTable[3] = 9;
-     *
-     * serialize(m, out); byte[] buf = baos.toByteArray();
-     * System.out.println(buf.length); Object obj = deserialize(new
-     * DataInputStream(new ByteArrayInputStream(buf))); System.out.println(obj); } {
-     * ByteArrayOutputStream baos = new ByteArrayOutputStream();
-     * DataOutputStream out = new DataOutputStream(baos);
-     *
-     * Membership m = new Membership(); m.src = 2; m.version = 3; m.members =
-     * new ArrayList<NodeInfo>(); NodeInfo n1 = new NodeInfo(); n1.addr =
-     * InetAddress.getLocalHost(); n1.port = 4; n1.id = 5; m.members.add(n1);
-     * NodeInfo n2 = new NodeInfo(); n2.addr =
-     * InetAddress.getByName("google.com"); n2.port = 6; n2.id = 7;
-     * m.members.add(n2); m.numNodes = 8;
-     *
-     * serialize(m, out); byte[] buf = baos.toByteArray();
-     * System.out.println(buf.length); Object obj = deserialize(new
-     * DataInputStream( new ByteArrayInputStream(buf)));
-     * System.out.println(obj); } }
-     */
+    public static void main(String[] args) throws IOException {
+{
+     ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      DataOutputStream out = new DataOutputStream(baos);
+      Pong pong = new Pong();
+      pong.src = 2;
+      pong.version = 3;
+      pong.time = 4;
+      serialize(pong, out);
+      byte[] buf = baos.toByteArray();
+      System.out.println(buf.length);
+      Object obj = deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
+      System.out.println(obj);
 }
+
+{
+     ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      DataOutputStream out = new DataOutputStream(baos);
+
+      Measurements m = new Measurements();
+      m.src = 2;
+      m.version = 3;
+      m.membershipList = new ArrayList<Integer>();
+      m.membershipList.add(4);
+      m.membershipList.add(5);
+      m.membershipList.add(6);
+      m.ProbeTable = new long[5];
+      m.ProbeTable[1] = 7;
+      m.ProbeTable[2] = 8;
+      m.ProbeTable[3] = 9;
+
+      serialize(m, out);
+      byte[] buf = baos.toByteArray();
+      System.out.println(buf.length);
+      Object obj = deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
+      System.out.println(obj);
+}
+{
+  ByteArrayOutputStream baos = new ByteArrayOutputStream();
+  DataOutputStream out = new DataOutputStream(baos);
+
+  Membership m = new Membership();
+  m.src = 2;
+  m.version = 3;
+  m.members = new ArrayList<NodeInfo>();
+  NodeInfo n1 = new NodeInfo();
+  n1.addr = InetAddress.getLocalHost();
+  n1.port = 4;
+  n1.id = 5;
+  m.members.add(n1);
+  NodeInfo n2 = new NodeInfo();
+  n2.addr = InetAddress.getByName("google.com");
+  n2.port = 6;
+  n2.id = 7;
+  m.members.add(n2);
+  m.numNodes = 8;
+
+  serialize(m, out);
+  byte[] buf = baos.toByteArray();
+  System.out.println(buf.length);
+  Object obj = deserialize(new DataInputStream(
+    new ByteArrayInputStream(buf)));
+  System.out.println(obj);
+}
+    }*/
+    }

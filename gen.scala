@@ -17,13 +17,13 @@ object GenIo {
     Type("NodeInfo",         "int id, int port, InetAddress addr"),
     Type("Rec",              "int dst, int via"),
     Type("Msg",              "int src, int version, int session", Array(
-      Type("Join",           "InetAddress addr"),
+      Type("Join",           "InetAddress addr, int port"),
       Type("Init",           "int id, ArrayList<NodeInfo> members"),
-      Type("Membership",     "ArrayList<NodeInfo> members, int numNodes"),
+      Type("Membership",     "ArrayList<NodeInfo> members, int numNodes, int yourId"),
       Type("RoutingRecs",    "ArrayList<Rec> recs"),
       Type("Ping",           "long time, NodeInfo info"),
       Type("Pong",           "long time"),
-      Type("Measurements",   "ArrayList<Integer> membershipList, Array<long> probeTable"),
+      Type("Measurements",   "Array<long> probeTable"),
       Type("MemberPoll",     ""),
       Type("PeeringRequest", "")
     ))
