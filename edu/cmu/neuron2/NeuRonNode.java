@@ -106,6 +106,7 @@ public class NeuRonNode extends Thread {
     private final int dumpPeriod;
 
     private final FileHandler fh;
+    private final int origNid;
 
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         if (props.getProperty(labelSet) != null) {
@@ -525,7 +526,7 @@ public class NeuRonNode extends Thread {
                 Msg msg = deserialize(obj);
                 synchronized (NeuRonNode.this) {
                     if (nodes.containsKey(msg.src)) {
-                        log("recv." + msg.getClass().getSimpleName(), "from " + msg.src);
+                        log("recv." + msg.getClass().getSimpleName(), "from " + msg.src + " (" + nodes.get(msg.src) + ")");
                         resetTimeoutAtCoord(msg.src);
                         if (msg instanceof Ping) {
                             // ignore the ping
