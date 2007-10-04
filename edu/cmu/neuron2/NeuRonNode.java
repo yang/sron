@@ -112,6 +112,7 @@ public class NeuRonNode extends Thread {
     private final int origNid;
 
     private final int sessionId;
+    private final int failoverTimeout;
 
     private final int membershipBroadcastPeriod;
 
@@ -163,6 +164,7 @@ public class NeuRonNode extends Thread {
             probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
         }
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
+        failoverTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + timeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
 
         Formatter fmt = new Formatter() {
@@ -647,28 +649,28 @@ public class NeuRonNode extends Thread {
                             if ((!capJoins || nodes.size() < numNodesHint) &&
                                     msg instanceof Ping) {
                                 Ping ping = (Ping) msg;
-                                log("obsolete." + ping.getClass().getSimpleName(),
+                                log("dead." + ping.getClass().getSimpleName(),
                                         "from '" + ping.src + "' " + ping.info.addr.getHostName());
 
                                 Integer mappedId = addr2id.get(ping.info.addr);
+                                int nid;
                                 if (mappedId == null) {
-                                    int nid = nextNodeId++;
+                                    nid = nextNodeId++;
                                     addMember(nid, ping.info.addr,
                                             ping.info.port, ping.info.id);
-
-                                    Init im = new Init();
-                                    im.id = nid;
-                                    im.src = myNid;
-                                    im.version = currentStateVersion;
-                                    im.members = getMemberInfos();
-                                    sendObject(im, nid);
-
                                     broadcastMembershipChange(nid);
                                 } else {
-                                    sendMembership(mappedId);
+                                    nid = mappedId;
                                 }
+
+                                Init im = new Init();
+                                im.id = nid;
+                                im.src = myNid;
+                                im.version = currentStateVersion;
+                                im.members = getMemberInfos();
+                                sendObject(im, nid);
                             } else {
-                                log("obsolete." + msg.getClass().getSimpleName(), "from '" + msg.src + "'");
+                                log("dead." + msg.getClass().getSimpleName(), "from '" + msg.src + "'");
                             }
                         }
                     } else {
@@ -837,7 +839,7 @@ public class NeuRonNode extends Thread {
                         err(ex);
                     }
                 }
-            }, timeout, TimeUnit.SECONDS);
+            }, failoverTimeout, TimeUnit.SECONDS);
             timeouts.put(nid, future);
         }
     }
@@ -998,9 +1000,6 @@ public class NeuRonNode extends Thread {
         log(toStringNeighborList());
     }
 
-    /**
-     * TODO XXX OPEN QUESTION HOW TO HANDLE NODE WORLD VIEW INCONSISTENCIES????
-     */
     private void repopulateGrid() {
         numCols = (int) Math.ceil(Math.sqrt(nodes.size()));
         numRows = (int) Math.ceil((double) nodes.size() / (double) numCols);
@@ -1028,6 +1027,7 @@ public class NeuRonNode extends Thread {
 
     private HashSet<GridNode> getNeighborList() {
         HashSet<GridNode> neighborSet = new HashSet<GridNode>();
+        // iterate over all grid positions, looking for self
         for (int r = 0; r < numRows; r++) {
             for (int c = 0; c < numCols; c++) {
 
@@ -1039,21 +1039,26 @@ public class NeuRonNode extends Thread {
                     // belong to us :)
 
                     // O(N^1.5)   :(
+                    // for each node in this column that's not me
                     for (int x = 0; x < numCols; x++) {
                         if (grid[r][x].id != myNid) {
                             GridNode neighbor = grid[r][x];
+                            // if they're alive, then add them a neighbor and move on
                             if (neighbor.isAlive && !ignored.contains(neighbor.id)) {
                                 neighborSet.add(neighbor);
                             } else if (scheme != RoutingScheme.SQRT_NOFAILOVER) {
                                 log("R node failover!");
+                                // for each node in this row that's not me
                                 for (int i = 0; i < numRows; i++) {
                                     if ( (i != r) && ((grid[i][c].isAlive == false) ||  ignored.contains(grid[i][c].id)) ) {
                                         /* (r, x) and (i, c) can't be reached
                                          * (i, x) needs a failover R node
                                          */
                                         boolean bFoundReplacement = false;
+                                        // within that failure column, search for a failover
                                         for (int j = 0; j < numCols; j++) {
                                             if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) && !ignored.contains(grid[i][j].id)) {
+                                                // request them as a failover and add them as a neighbor
                                                 PeeringRequest pr = new PeeringRequest();
                                                 sendObject(pr, grid[i][j].id);
                                                 neighborSet.add(grid[i][j]);
@@ -1062,9 +1067,12 @@ public class NeuRonNode extends Thread {
                                                 break;
                                             }
                                         }
+                                        // if no failover found
                                         if ((bFoundReplacement == false) && ((scheme == RoutingScheme.SQRT_RC_FAILOVER) || (scheme == RoutingScheme.SQRT_SPECIAL))) {
+                                            // within that failure row, search for a failover
                                             for (int j = 0; j < numRows; j++) {
                                                 if ( (grid[j][x].id != myNid) && (grid[j][x].isAlive == true) && !ignored.contains(grid[j][x].id)) {
+                                                    // request them as a failover and add them as a neighbor
                                                     PeeringRequest pr = new PeeringRequest();
                                                     sendObject(pr, grid[j][x].id);
                                                     neighborSet.add(grid[j][x]);
