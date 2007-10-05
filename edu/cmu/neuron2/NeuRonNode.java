@@ -77,7 +77,7 @@ public class NeuRonNode extends Thread {
 
     // probeTable[i] = node members[i]'s probe table. value
     // at index j in row i is the link latency between nodes members[i]->members[j].
-    long[][] probeTable;
+    short[][] probeTable;
     private GridNode[][] grid;
     private int numCols, numRows;
     private final HashSet<GridNode> overflowNeighbors = new HashSet<GridNode>();
@@ -575,7 +575,7 @@ public class NeuRonNode extends Thread {
         ignored.add(nid);
 
         ArrayList<Integer> sorted_nids = memberNids();
-        probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
+        probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Short.MAX_VALUE;
 
         Integer nextHop = nextHopTable.get(nid);
         if ((nextHop != null) && (nextHop == myNid)) {
@@ -766,7 +766,7 @@ public class NeuRonNode extends Thread {
                                     int rtt = (int) (System.currentTimeMillis() - pong.time);
                                     ArrayList<Integer> sortedNids = memberNids();
                                     int i = sortedNids.indexOf(myNid), j = sortedNids.indexOf(pong.src);
-                                    probeTable[i][j] = (int) (
+                                    probeTable[i][j] = (short) (
                                             smoothingFactor * (rtt / 2) +
                                             (1 - smoothingFactor) * probeTable[i][j]);
                                 }
@@ -853,7 +853,7 @@ public class NeuRonNode extends Thread {
                                 }
                             }
                             ArrayList<Integer> sorted_nids = memberNids();
-                            probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
+                            probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Short.MAX_VALUE;
                         }
                     } catch (Exception ex) {
                         err(ex);
@@ -1144,14 +1144,14 @@ public class NeuRonNode extends Thread {
      * the two membership views.
      */
     private void repopulateProbeTable(List<Integer> oldNids) {
-        long newProbeTable[][] = new long[nodes.size()][nodes.size()];
+        short newProbeTable[][] = new short[nodes.size()][nodes.size()];
 
         int nodeIndex = memberNids().indexOf(myNid);
         for (int i = 0; i < memberNids().size(); i++) {
             if (i == nodeIndex) {
                 newProbeTable[i][i] = 0;
             } else {
-                newProbeTable[nodeIndex][i] = Integer.MAX_VALUE;
+                newProbeTable[nodeIndex][i] = Short.MAX_VALUE;
             }
         }
 
@@ -1678,7 +1678,7 @@ class Pong extends Msg {
 long time;
 }
 class Measurements extends Msg {
-long[] probeTable;
+short[] probeTable;
 }
 class MemberPoll extends Msg {
 }
@@ -1775,7 +1775,7 @@ else if (obj.getClass() == Measurements.class) {
 Measurements casted = (Measurements) obj; out.writeInt(9);
 out.writeInt(casted.probeTable.length);
 for (int i = 0; i < casted.probeTable.length; i++) {
-out.writeLong(casted.probeTable[i]);
+out.writeShort(casted.probeTable[i]);
 }
 out.writeInt(casted.src);
 out.writeInt(casted.version);
@@ -2079,10 +2079,10 @@ Measurements obj;
 {
 obj = new Measurements();
 {
-obj.probeTable = new long[readInt(in)];
+obj.probeTable = new short[readInt(in)];
 for (int i = 0; i < obj.probeTable.length; i++) {
 {
-obj.probeTable[i] = in.readLong();
+obj.probeTable[i] = in.readShort();
 }
 }
 }

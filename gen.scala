@@ -23,7 +23,7 @@ object GenIo {
       Type("RoutingRecs",    "ArrayList<Rec> recs"),
       Type("Ping",           "long time, NodeInfo info"),
       Type("Pong",           "long time"),
-      Type("Measurements",   "Array<long> probeTable"),
+      Type("Measurements",   "Array<short> probeTable"),
       Type("MemberPoll",     ""),
       Type("PeeringRequest", "")
     ))
