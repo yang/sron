@@ -66,28 +66,28 @@ class LabelFilter implements Filter {
 public class NeuRonNode extends Thread {
     private final ExecutorService executor;
     private final ScheduledExecutorService scheduler;
-    public int myNid;
+    public short myNid;
     private final boolean isCoordinator;
     private final String coordinatorHost;
     private final int basePort;
     private final AtomicBoolean doQuit = new AtomicBoolean();
     private Logger logger;
 
-    private final Hashtable<Integer, NodeInfo> nodes = new Hashtable<Integer, NodeInfo>();
+    private final Hashtable<Short, NodeInfo> nodes = new Hashtable<Short, NodeInfo>();
 
     // probeTable[i] = node members[i]'s probe table. value
     // at index j in row i is the link latency between nodes members[i]->members[j].
     short[][] probeTable;
     private GridNode[][] grid;
-    private int numCols, numRows;
+    private short numCols, numRows;
     private final HashSet<GridNode> overflowNeighbors = new HashSet<GridNode>();
-    private Hashtable<Integer, Integer> nextHopTable = new Hashtable<Integer, Integer>();
-    private Hashtable<Integer, HashSet<Integer>> nextHopOptions = new Hashtable<Integer, HashSet<Integer>>();
+    private Hashtable<Short, Short> nextHopTable = new Hashtable<Short, Short>();
+    private Hashtable<Short, HashSet<Short>> nextHopOptions = new Hashtable<Short, HashSet<Short>>();
     private final IoServiceConfig cfg = new DatagramAcceptorConfig();
 
-    private final Hashtable<InetAddress, Integer> addr2id = new Hashtable<InetAddress, Integer>();
+    private final Hashtable<InetAddress, Short> addr2id = new Hashtable<InetAddress, Short>();
 
-    private int currentStateVersion;
+    private short currentStateVersion;
 
     public final int neighborBroadcastPeriod;
     public final int probePeriod;
@@ -96,12 +96,12 @@ public class NeuRonNode extends Thread {
     private final DatagramSocket sendSocket;
 
     private final RunMode mode;
-    private final int numNodesHint;
+    private final short numNodesHint;
     private final Semaphore semAllJoined;
 
     private final InetAddress myCachedAddr;
-    private ArrayList<Integer> cachedMemberNids; // sorted list of members
-    private int cachedMemberNidsVersion;
+    private ArrayList<Short> cachedMemberNids = new ArrayList<Short>(); // sorted list of members
+    private short cachedMemberNidsVersion;
     private final boolean blockJoins;
     private final boolean capJoins;
     private final int joinTimeLimit; // seconds
@@ -109,16 +109,16 @@ public class NeuRonNode extends Thread {
     private final int dumpPeriod;
 
     private final FileHandler fh;
-    private final int origNid;
+    private final short origNid;
 
-    private final int sessionId;
+    private final short sessionId;
     private final int failoverTimeout;
 
     private final int membershipBroadcastPeriod;
 
     private static final String defaultLabelSet = "send.Ping recv.Ping stale.Ping send.Pong recv.Pong stale.Pong send.Measurement send.RoutingRecs";
 
-    private final Hashtable<Integer,Long> lastSentMbr = new Hashtable<Integer,Long>();
+    private final Hashtable<Short,Long> lastSentMbr = new Hashtable<Short,Long>();
 
     private final double smoothingFactor;
 
@@ -128,8 +128,8 @@ public class NeuRonNode extends Thread {
         handler.setFilter(new LabelFilter(suppressedLabels));
     }
 
-    public NeuRonNode(int id, ExecutorService executor, ScheduledExecutorService scheduler,
-                        Properties props, int numNodes, Semaphore semJoined,
+    public NeuRonNode(short id, ExecutorService executor, ScheduledExecutorService scheduler,
+                        Properties props, short numNodes, Semaphore semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode) {
 
         if ((coordNode == null) || (coordNode.addr == null)){
@@ -140,14 +140,13 @@ public class NeuRonNode extends Thread {
 
         myNid = id;
         origNid = id;
-        currentStateVersion = 0;
-        cachedMemberNidsVersion = -1;
-        cachedMemberNids = new ArrayList<Integer>();
+        currentStateVersion = (short)0;
+        cachedMemberNidsVersion = (short)-1;
         joinTimeLimit = Integer.parseInt(props.getProperty("joinTimeLimit", "10")); // wait up to 10 secs by default for coord to be available
         membershipBroadcastPeriod = Integer.parseInt(props.getProperty("membershipBroadcastPeriod", "0"));
 
         // NOTE note that you'll probably want to set this, always!
-        sessionId = Integer.parseInt(props.getProperty("sessionId", "0"));
+        sessionId = Short.parseShort(props.getProperty("sessionId", "0"));
 
         blockJoins = Boolean.valueOf(props.getProperty("blockJoins", "true"));
         capJoins = Boolean.valueOf(props.getProperty("capJoins", "true"));
@@ -205,7 +204,7 @@ public class NeuRonNode extends Thread {
         numCols = numRows = 0;
         isCoordinator = myNid == 0;
 
-        numNodesHint = Integer.parseInt(props.getProperty("numNodesHint", "" + numNodes));
+        numNodesHint = Short.parseShort(props.getProperty("numNodesHint", "" + numNodes));
         semAllJoined = semJoined;
 
         if (myAddr == null) {
@@ -300,7 +299,7 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private int nextNodeId = 1;
+    private short nextNodeId = 1;
 
 
     //private Runnable makeSafeRunnable(Runnable r) {
@@ -337,7 +336,7 @@ public class NeuRonNode extends Thread {
                             synchronized (NeuRonNode.this) {
                                 try {
                                     if (membersChanged.get()) {
-                                        broadcastMembershipChange(0);
+                                        broadcastMembershipChange((short) 0);
                                     }
                                 } catch (Exception ex) {
                                     // failure-oblivious: swallow any exceptions and
@@ -361,7 +360,7 @@ public class NeuRonNode extends Thread {
                     ss.setSoTimeout(1000);
                     log("Beep!");
 
-                    final Hashtable<Integer, Socket> incomingSocks = new Hashtable<Integer, Socket>();
+                    final Hashtable<Short, Socket> incomingSocks = new Hashtable<Short, Socket>();
                     while (!doQuit.get()) {
                         final Socket incoming;
                         try {
@@ -369,7 +368,7 @@ public class NeuRonNode extends Thread {
                         } catch (SocketTimeoutException ex) {
                             continue;
                         }
-                        final int nodeId;
+                        final short nodeId;
                         // this is OK since nid orderings are irrelevant
                         synchronized (NeuRonNode.this) {
                             nodeId = nextNodeId++;
@@ -425,9 +424,9 @@ public class NeuRonNode extends Thread {
                             }
 
                             private void doit(
-                                    final Hashtable<Integer, Socket> incomingSocks,
+                                    final Hashtable<Short, Socket> incomingSocks,
                                     ArrayList<NodeInfo> memberList,
-                                    int nid) throws IOException {
+                                    short nid) throws IOException {
                                 Init im = new Init();
                                 im.id = nid;
                                 im.src = myNid;
@@ -568,22 +567,22 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private final HashSet<Integer> ignored = new HashSet<Integer>();
+    private final HashSet<Short> ignored = new HashSet<Short>();
 
-    public synchronized void ignore(int nid) {
+    public synchronized void ignore(short nid) {
         log("ignoring " + nid);
         ignored.add(nid);
 
-        ArrayList<Integer> sorted_nids = memberNids();
+        ArrayList<Short> sorted_nids = memberNids();
         probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Short.MAX_VALUE;
 
-        Integer nextHop = nextHopTable.get(nid);
+        Short nextHop = nextHopTable.get(nid);
         if ((nextHop != null) && (nextHop == myNid)) {
             nextHopTable.remove(nid);
         }
-        HashSet<Integer> nhSet = nextHopOptions.get(nid);
+        HashSet<Short> nhSet = nextHopOptions.get(nid);
         if (nhSet != null) {
-            for (Iterator<Integer> it = nhSet.iterator(); it.hasNext();) {
+            for (Iterator<Short> it = nhSet.iterator(); it.hasNext();) {
                 if (it.next() == myNid) {
                     it.remove();
                 }
@@ -591,7 +590,7 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    public synchronized void unignore(int nid) {
+    public synchronized void unignore(short nid) {
         log("unignoring " + nid);
         ignored.remove(nid);
     }
@@ -605,7 +604,7 @@ public class NeuRonNode extends Thread {
         ping.info.id = origNid; // note that the ping info uses the original id
         ping.info.addr = tmp.addr;
         ping.info.port = tmp.port;
-        for (int nid : nodes.keySet())
+        for (short nid : nodes.keySet())
             if (nid != myNid)
                 sendObject(ping, nid);
 
@@ -618,7 +617,7 @@ public class NeuRonNode extends Thread {
            On seeing a subsequent msg from the co-ord that X has been removed from the overlay, if a node Y
            has not sent its "i think X is dead" msg, it can cancel this event.
         */
-        sendObject(ping, 0);
+        sendObject(ping, (short)0);
     }
 
     private Msg deserialize(Object o) {
@@ -634,8 +633,8 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private Hashtable<Integer,Integer> id2id = new Hashtable<Integer,Integer>();
-    private Hashtable<Integer,String> id2name = new Hashtable<Integer,String>();
+    private Hashtable<Short,Short> id2id = new Hashtable<Short,Short>();
+    private Hashtable<Short,String> id2name = new Hashtable<Short,String>();
 
     /**
      * coordinator's msg handling loop
@@ -670,8 +669,8 @@ public class NeuRonNode extends Thread {
                                 log("dead." + ping.getClass().getSimpleName(),
                                         "from '" + ping.src + "' " + ping.info.addr.getHostName());
 
-                                Integer mappedId = addr2id.get(ping.info.addr);
-                                int nid;
+                                Short mappedId = addr2id.get(ping.info.addr);
+                                short nid;
                                 if (mappedId == null) {
                                     nid = nextNodeId++;
                                     addMember(nid, ping.info.addr,
@@ -726,7 +725,7 @@ public class NeuRonNode extends Thread {
                             sendObject(pong, ping.info);
                         } else if (msg instanceof Pong) {
                             Pong pong = (Pong) msg;
-                            int rtt = (int) (System.currentTimeMillis() - pong.time);
+                            short rtt = (short) (System.currentTimeMillis() - pong.time);
                             log("latency", "one way latency to " + pong.src + " = " + rtt/2);
                         }
 
@@ -763,8 +762,8 @@ public class NeuRonNode extends Thread {
                                 if (!ignored.contains(msg.src)) {
                                     Pong pong = (Pong) msg;
                                     resetTimeoutAtNode(pong.src);
-                                    int rtt = (int) (System.currentTimeMillis() - pong.time);
-                                    ArrayList<Integer> sortedNids = memberNids();
+                                    short rtt = (short) (System.currentTimeMillis() - pong.time);
+                                    ArrayList<Short> sortedNids = memberNids();
                                     int i = sortedNids.indexOf(myNid), j = sortedNids.indexOf(pong.src);
                                     probeTable[i][j] = (short) (
                                             smoothingFactor * (rtt / 2) +
@@ -799,14 +798,14 @@ public class NeuRonNode extends Thread {
      * them dead.
      */
     private int timeout;
-    private Hashtable<Integer, ScheduledFuture<?>> timeouts = new Hashtable<Integer, ScheduledFuture<?>>();
+    private Hashtable<Short, ScheduledFuture<?>> timeouts = new Hashtable<Short, ScheduledFuture<?>>();
 
     /**
      * a coord-only method
      *
      * @param nid
      */
-    private void resetTimeoutAtCoord(final int nid) {
+    private void resetTimeoutAtCoord(final short nid) {
         if (nodes.containsKey(nid)) {
             ScheduledFuture<?> oldFuture = timeouts.get(nid);
             if (oldFuture != null) {
@@ -827,14 +826,14 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private void resetTimeoutAtNode(final int nid) {
+    private void resetTimeoutAtNode(final short nid) {
         if (nodes.containsKey(nid)) {
             ScheduledFuture<?> oldFuture = timeouts.get(nid);
             if (oldFuture != null) {
                 oldFuture.cancel(false);
             }
-            for (int i = 0; i < numRows; i++) {
-                for (int j = 0; j < numCols; j++) {
+            for (short i = 0; i < numRows; i++) {
+                for (short j = 0; j < numCols; j++) {
                     if (grid[i][j].id == nid) {
                         grid[i][j].isAlive = true;
                     }
@@ -845,14 +844,14 @@ public class NeuRonNode extends Thread {
                     try {
                         synchronized (NeuRonNode.this) {
                             // O(n)
-                            for (int i = 0; i < numRows; i++) {
-                                for (int j = 0; j < numCols; j++) {
+                            for (short i = 0; i < numRows; i++) {
+                                for (short j = 0; j < numCols; j++) {
                                     if (grid[i][j].id == nid) {
                                         grid[i][j].isAlive = false;
                                     }
                                 }
                             }
-                            ArrayList<Integer> sorted_nids = memberNids();
+                            ArrayList<Short> sorted_nids = memberNids();
                             probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Short.MAX_VALUE;
                         }
                     } catch (Exception ex) {
@@ -867,7 +866,7 @@ public class NeuRonNode extends Thread {
     /**
      * a coordinator-only method
      */
-    private NodeInfo addMember(int newNid, InetAddress addr, int port, int origId) {
+    private NodeInfo addMember(short newNid, InetAddress addr, int port, short origId) {
         NodeInfo info = new NodeInfo();
         info.id = newNid;
         info.addr = addr;
@@ -883,19 +882,19 @@ public class NeuRonNode extends Thread {
         return info;
     }
 
-    private ArrayList<Integer> memberNids() {
+    private ArrayList<Short> memberNids() {
         if ((cachedMemberNidsVersion < currentStateVersion) || (cachedMemberNids == null) ) {
             //log("NEW cachedMemberNids (" + cachedMemberNidsVersion + ", " + currentStateVersion);
             cachedMemberNidsVersion = currentStateVersion;
-            cachedMemberNids = new ArrayList<Integer>(nodes.keySet());
+            cachedMemberNids = new ArrayList<Short>(nodes.keySet());
             Collections.sort(cachedMemberNids);
             //log("Size = " + cachedMemberNids.size());
         }
         return cachedMemberNids;
     }
 
-    private ArrayList<Integer> getUncachedmemberNids() {
-        ArrayList<Integer> nids = new ArrayList<Integer>(nodes.keySet());
+    private ArrayList<Short> getUncachedmemberNids() {
+        ArrayList<Short> nids = new ArrayList<Short>(nodes.keySet());
         Collections.sort(nids);
         return nids;
     }
@@ -909,9 +908,9 @@ public class NeuRonNode extends Thread {
      * periodic membership-broadcast daemon thread, so actually send stuff;
      * otherwise, we should just signal to the daemon thread a pending change
      */
-    private void broadcastMembershipChange(int exceptNid) {
+    private void broadcastMembershipChange(short exceptNid) {
         if (exceptNid == 0 || membershipBroadcastPeriod == 0) {
-            for (int nid : nodes.keySet()) {
+            for (short nid : nodes.keySet()) {
                 if (nid != exceptNid) {
                     sendMembership(nid);
                 }
@@ -928,7 +927,7 @@ public class NeuRonNode extends Thread {
      *
      * throttles these messages so they're sent at most once per second
      */
-    private void sendMembership(int nid) {
+    private void sendMembership(short nid) {
         Membership msg = new Membership();
         msg.yourId = nid;
         //Long last = lastSentMbr.get(nid);
@@ -947,35 +946,35 @@ public class NeuRonNode extends Thread {
      *
      * @param nid
      */
-    private void removeMember(int nid) {
+    private void removeMember(short nid) {
         log("removing dead node " + nid + " oid " + id2id.get(nid) + " " +
                 id2name.get(nid));
         NodeInfo info = nodes.remove(nid);
-        Integer mid = addr2id.remove(info.addr);
+        Short mid = addr2id.remove(info.addr);
         assert mid != null;
         currentStateVersion++;
         broadcastMembershipChange(nid);
     }
 
     private void updateMembers(List<NodeInfo> newNodes) {
-        List<Integer> oldNids = getUncachedmemberNids();
+        List<Short> oldNids = getUncachedmemberNids();
         nodes.clear();
 
         for (NodeInfo node : newNodes) {
             nodes.put(node.id, node);
         }
 
-        Hashtable<Integer, Integer> newNextHopTable = new Hashtable<Integer, Integer>(nodes.size());
-        Hashtable<Integer, HashSet<Integer>> newNextHopOptions = new Hashtable<Integer, HashSet<Integer>>(nodes.size());
+        Hashtable<Short, Short> newNextHopTable = new Hashtable<Short, Short>(nodes.size());
+        Hashtable<Short, HashSet<Short>> newNextHopOptions = new Hashtable<Short, HashSet<Short>>(nodes.size());
 
         for (NodeInfo node : newNodes) {
             if (node.id != myNid) {
-                Integer nextHop = nextHopTable.get(node.id);
+                Short nextHop = nextHopTable.get(node.id);
                 if (nextHop == null) {
                     // new node !
                     /*
                     newNextHopTable.put(node.id, myNid);
-                    HashSet<Integer> nextHops = new HashSet<Integer>();
+                    HashSet<Short> nextHops = new HashSet<Short>();
                     nextHops.add(myNid);
                     newNextHopOptions.put(node.id, nextHops);
                     */
@@ -994,10 +993,10 @@ public class NeuRonNode extends Thread {
                     }
                     // of all the possible next hop options to the node,
                     // remove those that are dead.
-                    HashSet<Integer> nextHops = nextHopOptions.get(node.id);
+                    HashSet<Short> nextHops = nextHopOptions.get(node.id);
                     if (nextHops != null) {
-                       for (Iterator<Integer> it = nextHops.iterator (); it.hasNext (); ) {
-                            Integer someNextHop = it.next();
+                       for (Iterator<Short> it = nextHops.iterator (); it.hasNext (); ) {
+                            Short someNextHop = it.next();
                             if (nodes.get(someNextHop) == null) {
                                 it.remove ();
                             }
@@ -1005,7 +1004,7 @@ public class NeuRonNode extends Thread {
                        newNextHopOptions.put(node.id, nextHops);
                     } else {
                         /*
-                        HashSet<Integer> nh = new HashSet<Integer>();
+                        HashSet<Short> nh = new HashSet<Short>();
                         nextHops.add(myNid);
                         newNextHopOptions.put(node.id, nh);
                         */
@@ -1027,13 +1026,13 @@ public class NeuRonNode extends Thread {
     }
 
     private void repopulateGrid() {
-        numCols = (int) Math.ceil(Math.sqrt(nodes.size()));
-        numRows = (int) Math.ceil((double) nodes.size() / (double) numCols);
+        numCols = (short) Math.ceil(Math.sqrt(nodes.size()));
+        numRows = (short) Math.ceil((double) nodes.size() / (double) numCols);
         grid = new GridNode[numRows][numCols];
-        List<Integer> nids = memberNids();
-        int m = 0;
-        for (int i = 0; i < numRows; i++) {
-            for (int j = 0; j < numCols; j++) {
+        List<Short> nids = memberNids();
+        short m = 0;
+        for (short i = 0; i < numRows; i++) {
+            for (short j = 0; j < numCols; j++) {
                 if (m >= nids.size()) {
                     m = 0;
                 }
@@ -1054,8 +1053,8 @@ public class NeuRonNode extends Thread {
     private HashSet<GridNode> getNeighborList() {
         HashSet<GridNode> neighborSet = new HashSet<GridNode>();
         // iterate over all grid positions, looking for self
-        for (int r = 0; r < numRows; r++) {
-            for (int c = 0; c < numCols; c++) {
+        for (short r = 0; r < numRows; r++) {
+            for (short c = 0; c < numCols; c++) {
 
                 // this can happen at most twice
                 if (scheme == RoutingScheme.SIMPLE) {
@@ -1066,7 +1065,7 @@ public class NeuRonNode extends Thread {
 
                     // O(N^1.5)   :(
                     // for each node in this column that's not me
-                    for (int x = 0; x < numCols; x++) {
+                    for (short x = 0; x < numCols; x++) {
                         if (grid[r][x].id != myNid) {
                             GridNode neighbor = grid[r][x];
                             // if they're alive, then add them a neighbor and move on
@@ -1074,7 +1073,7 @@ public class NeuRonNode extends Thread {
                                 neighborSet.add(neighbor);
                             } else if (scheme != RoutingScheme.SQRT_NOFAILOVER) {
                                 // for each node in this row that's not me
-                                for (int i = 0; i < numRows; i++) {
+                                for (short i = 0; i < numRows; i++) {
                                     if ( (i != r) && ((grid[i][c].isAlive == false) ||  ignored.contains(grid[i][c].id)) ) {
                                         /* (r, x) and (i, c) can't be reached
                                          * (i, x) needs a failover R node
@@ -1082,7 +1081,7 @@ public class NeuRonNode extends Thread {
                                         log("R node failover!");
                                         boolean bFoundReplacement = false;
                                         // within that failure column, search for a failover
-                                        for (int j = 0; j < numCols; j++) {
+                                        for (short j = 0; j < numCols; j++) {
                                             if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) && !ignored.contains(grid[i][j].id)) {
                                                 // request them as a failover and add them as a neighbor
                                                 PeeringRequest pr = new PeeringRequest();
@@ -1096,7 +1095,7 @@ public class NeuRonNode extends Thread {
                                         // if no failover found
                                         if ((bFoundReplacement == false) && ((scheme == RoutingScheme.SQRT_RC_FAILOVER) || (scheme == RoutingScheme.SQRT_SPECIAL))) {
                                             // within that failure row, search for a failover
-                                            for (int j = 0; j < numRows; j++) {
+                                            for (short j = 0; j < numRows; j++) {
                                                 if ( (grid[j][x].id != myNid) && (grid[j][x].isAlive == true) && !ignored.contains(grid[j][x].id)) {
                                                     // request them as a failover and add them as a neighbor
                                                     PeeringRequest pr = new PeeringRequest();
@@ -1113,7 +1112,7 @@ public class NeuRonNode extends Thread {
                             }
                         }
                     }
-                    for (int x = 0; x < numRows; x++) {
+                    for (short x = 0; x < numRows; x++) {
                         if (grid[x][c].id != myNid) {
                             neighborSet.add(grid[x][c]);
                         }
@@ -1127,8 +1126,8 @@ public class NeuRonNode extends Thread {
 
     private HashSet<GridNode> getOtherMembers() {
         HashSet<GridNode> memberSet = new HashSet<GridNode>();
-        for (int r = 0; r < numRows; r++) {
-            for (int c = 0; c < numCols; c++) {
+        for (short r = 0; r < numRows; r++) {
+            for (short c = 0; c < numCols; c++) {
                 if (grid[r][c].id != myNid) {
                     memberSet.add(grid[r][c]);
                 }
@@ -1143,7 +1142,7 @@ public class NeuRonNode extends Thread {
      * over probe info from previous table for the nodes that are common across
      * the two membership views.
      */
-    private void repopulateProbeTable(List<Integer> oldNids) {
+    private void repopulateProbeTable(List<Short> oldNids) {
         short newProbeTable[][] = new short[nodes.size()][nodes.size()];
 
         int nodeIndex = memberNids().indexOf(myNid);
@@ -1184,7 +1183,7 @@ public class NeuRonNode extends Thread {
     private String toStingMembership() {
         String s = new String("Membership for Node " + myNid
                 + ". Membership = [");
-        for (Integer memberId : memberNids()) {
+        for (Short memberId : memberNids()) {
             s += memberId + ", ";
         }
         s += "]";
@@ -1205,7 +1204,7 @@ public class NeuRonNode extends Thread {
     private String toStringNextHopTable() {
         String s = new String("Next-hop table for " + myNid
                 + " = [");
-        for (Integer node : nextHopTable.keySet()) {
+        for (Short node : nextHopTable.keySet()) {
             s += node + " -> " + nextHopTable.get(node) + "; ";
         }
         s += "]";
@@ -1236,7 +1235,7 @@ public class NeuRonNode extends Thread {
     }
 
     private void printProbeTable() {
-        ArrayList<Integer> sorted_nids = memberNids();
+        ArrayList<Short> sorted_nids = memberNids();
         int myIndex = sorted_nids.indexOf(myNid);
 
         String s = new String("Adj table for " + myNid
@@ -1249,7 +1248,7 @@ public class NeuRonNode extends Thread {
     }
 
     private void printProbeTable(int probeTableOffset) {
-        ArrayList<Integer> sorted_nids = memberNids();
+        ArrayList<Short> sorted_nids = memberNids();
 
         String s = new String("Adj table for " + sorted_nids.get(probeTableOffset)
                 + " = [");
@@ -1270,7 +1269,7 @@ public class NeuRonNode extends Thread {
         HashSet<GridNode> nl = getNeighborList();
         nl.addAll(overflowNeighbors);
         overflowNeighbors.clear();
-        ArrayList<Integer> sortedNids = memberNids();
+        ArrayList<Short> sortedNids = memberNids();
         int totalSize = 0;
         for (GridNode src : nl) {
             int srcOffset = sortedNids.indexOf(src.id);
@@ -1318,7 +1317,7 @@ public class NeuRonNode extends Thread {
         HashSet<GridNode> nl = getNeighborList();
         nl.addAll(overflowNeighbors);
         overflowNeighbors.clear();
-        ArrayList<Integer> sortedNids = memberNids();
+        ArrayList<Short> sortedNids = memberNids();
 
         HashSet<GridNode> others = getOtherMembers();
         others.removeAll(nl);
@@ -1366,7 +1365,7 @@ public class NeuRonNode extends Thread {
                     }
                     Rec rec = new Rec();
                     rec.dst = dst.id;
-                    rec.via = mini;
+                    rec.via = (short)mini;
                     recs.add(rec);
                 }
             }
@@ -1381,7 +1380,7 @@ public class NeuRonNode extends Thread {
 //    /**
 //     * caches names
 //     */
-//    private String id2nm(int nid, String addr) {
+//    private String id2nm(short nid, String addr) {
 //        if (nid >= 0) {
 //            String name = id2name.get(nid);
 //            if (name == null) {
@@ -1401,7 +1400,7 @@ public class NeuRonNode extends Thread {
 
     private Serialization senderSer = new Serialization();
 
-    private int sendObject(final Msg o, InetAddress addr, int port, int nid) {
+    private int sendObject(final Msg o, InetAddress addr, int port, short nid) {
         o.src = myNid;
         o.version = currentStateVersion;
         o.session = sessionId;
@@ -1437,15 +1436,15 @@ public class NeuRonNode extends Thread {
 //            }, cfg);
     }
 
-    private int sendObject(final Msg o, NodeInfo info, int nid) {
+    private int sendObject(final Msg o, NodeInfo info, short nid) {
         return sendObject(o, info.addr, info.port, nid);
     }
 
     private int sendObject(final Msg o, NodeInfo info) {
-        return sendObject(o, info, -1);
+        return sendObject(o, info, (short)-1);
     }
 
-    private int sendObject(final Msg o, int nid) {
+    private int sendObject(final Msg o, short nid) {
         return nid != myNid && !ignored.contains(nid) ?
             sendObject(o, nid == 0 ? coordNode : nodes.get(nid), nid) : 0;
     }
@@ -1453,7 +1452,7 @@ public class NeuRonNode extends Thread {
     private void broadcastMeasurements() {
         Measurements rm = new Measurements();
         //rm.membershipList = memberNids();
-        ArrayList<Integer> sorted_nids = memberNids();
+        ArrayList<Short> sorted_nids = memberNids();
         rm.probeTable = probeTable[sorted_nids.indexOf(myNid)].clone();
         HashSet<GridNode> nl = getNeighborList();
         int totalSize = 0;
@@ -1504,9 +1503,9 @@ public class NeuRonNode extends Thread {
                     }
                     */
 
-                    HashSet<Integer> nextHops = nextHopOptions.get(r.dst);
+                    HashSet<Short> nextHops = nextHopOptions.get(r.dst);
                     if (nextHops == null) {
-                        nextHops = new HashSet<Integer>();
+                        nextHops = new HashSet<Short>();
                         nextHopOptions.put(r.dst, nextHops);
                     }
                     nextHops.add(r.via);
@@ -1518,7 +1517,7 @@ public class NeuRonNode extends Thread {
         log(toStringNextHopTable());
         int reachable = 0;
         int oneHopPathsAvailable = 0;
-        for (int nid : nextHopTable.keySet()) {
+        for (short nid : nextHopTable.keySet()) {
             int nextHop = nextHopTable.get(nid);
             if (nextHop != myNid) {
                 if (!ignored.contains(nextHop)) {
@@ -1532,10 +1531,10 @@ public class NeuRonNode extends Thread {
                 //log("$$$ not considering " + nextHop);
             }
 
-            HashSet<Integer> nhSet = nextHopOptions.get(nid);
+            HashSet<Short> nhSet = nextHopOptions.get(nid);
             if (nhSet != null) {
-                for (Iterator<Integer> it = nhSet.iterator(); it.hasNext();) {
-                    Integer someNextHop = it.next();
+                for (Iterator<Short> it = nhSet.iterator(); it.hasNext();) {
+                    Short someNextHop = it.next();
                     if (!ignored.contains(someNextHop)) {
                         oneHopPathsAvailable++;
                     }
@@ -1548,11 +1547,11 @@ public class NeuRonNode extends Thread {
 
         // this crap is needed because if eveyone but one member (X) in your row has died
         // then there is no one to tell you about X
-        Set<Integer> knownMembers = new HashSet<Integer>(nodes.keySet());
-        Set<Integer> recoBasedReachableMembers = nextHopTable.keySet();
+        Set<Short> knownMembers = new HashSet<Short>(nodes.keySet());
+        Set<Short> recoBasedReachableMembers = nextHopTable.keySet();
 
         knownMembers.removeAll(recoBasedReachableMembers);
-        for (int nid : knownMembers) {
+        for (short nid : knownMembers) {
             if (!ignored.contains(nid) && (nid != myNid)) {
                 reachable++;
                 oneHopPathsAvailable++;
@@ -1574,7 +1573,7 @@ public class NeuRonNode extends Thread {
 }
 
 class GridNode {
-    public int id;
+    public short id;
     public boolean isAlive;
 
     public String toString() {
@@ -1641,32 +1640,33 @@ class GridNode {
 
 
 
+
 class NodeInfo  {
-int id;
+short id;
 int port;
 InetAddress addr;
 }
 class Rec  {
-int dst;
-int via;
+short dst;
+short via;
 }
 class Msg  {
-int src;
-int version;
-int session;
+short src;
+short version;
+short session;
 }
 class Join extends Msg {
 InetAddress addr;
 int port;
 }
 class Init extends Msg {
-int id;
+short id;
 ArrayList<NodeInfo> members;
 }
 class Membership extends Msg {
 ArrayList<NodeInfo> members;
-int numNodes;
-int yourId;
+short numNodes;
+short yourId;
 }
 class RoutingRecs extends Msg {
 ArrayList<Rec> recs;
@@ -1694,83 +1694,83 @@ class PeeringRequest extends Msg {
       
 else if (obj.getClass() == NodeInfo.class) {
 NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
-out.writeInt(casted.id);
+out.writeShort(casted.id);
 out.writeInt(casted.port);
 byte[] buf = casted.addr.getAddress();out.writeInt(buf.length);out.write(buf);
 }
 else if (obj.getClass() == Rec.class) {
 Rec casted = (Rec) obj; out.writeInt(1);
-out.writeInt(casted.dst);
-out.writeInt(casted.via);
+out.writeShort(casted.dst);
+out.writeShort(casted.via);
 }
 else if (obj.getClass() == Msg.class) {
 Msg casted = (Msg) obj; out.writeInt(2);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == Join.class) {
 Join casted = (Join) obj; out.writeInt(3);
 byte[] buf = casted.addr.getAddress();out.writeInt(buf.length);out.write(buf);
 out.writeInt(casted.port);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == Init.class) {
 Init casted = (Init) obj; out.writeInt(4);
-out.writeInt(casted.id);
+out.writeShort(casted.id);
  out.writeInt(casted.members.size()); 
 for (int i = 0; i < casted.members.size(); i++) {
-out.writeInt(casted.members.get(i).id);
+out.writeShort(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
 byte[] buf = casted.members.get(i).addr.getAddress();out.writeInt(buf.length);out.write(buf);
 }
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == Membership.class) {
 Membership casted = (Membership) obj; out.writeInt(5);
  out.writeInt(casted.members.size()); 
 for (int i = 0; i < casted.members.size(); i++) {
-out.writeInt(casted.members.get(i).id);
+out.writeShort(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
 byte[] buf = casted.members.get(i).addr.getAddress();out.writeInt(buf.length);out.write(buf);
 }
-out.writeInt(casted.numNodes);
-out.writeInt(casted.yourId);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.numNodes);
+out.writeShort(casted.yourId);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == RoutingRecs.class) {
 RoutingRecs casted = (RoutingRecs) obj; out.writeInt(6);
  out.writeInt(casted.recs.size()); 
 for (int i = 0; i < casted.recs.size(); i++) {
-out.writeInt(casted.recs.get(i).dst);
-out.writeInt(casted.recs.get(i).via);
+out.writeShort(casted.recs.get(i).dst);
+out.writeShort(casted.recs.get(i).via);
 }
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == Ping.class) {
 Ping casted = (Ping) obj; out.writeInt(7);
 out.writeLong(casted.time);
-out.writeInt(casted.info.id);
+out.writeShort(casted.info.id);
 out.writeInt(casted.info.port);
 byte[] buf = casted.info.addr.getAddress();out.writeInt(buf.length);out.write(buf);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == Pong.class) {
 Pong casted = (Pong) obj; out.writeInt(8);
 out.writeLong(casted.time);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == Measurements.class) {
 Measurements casted = (Measurements) obj; out.writeInt(9);
@@ -1778,21 +1778,21 @@ out.writeInt(casted.probeTable.length);
 for (int i = 0; i < casted.probeTable.length; i++) {
 out.writeShort(casted.probeTable[i]);
 }
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == MemberPoll.class) {
 MemberPoll casted = (MemberPoll) obj; out.writeInt(10);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 else if (obj.getClass() == PeeringRequest.class) {
 PeeringRequest casted = (PeeringRequest) obj; out.writeInt(11);
-out.writeInt(casted.src);
-out.writeInt(casted.version);
-out.writeInt(casted.session);
+out.writeShort(casted.src);
+out.writeShort(casted.version);
+out.writeShort(casted.session);
 }
 }
 
@@ -1804,7 +1804,7 @@ NodeInfo obj;
 {
 obj = new NodeInfo();
 {
-obj.id = readInt(in);
+obj.id = in.readShort();
 }
 {
 obj.port = readInt(in);
@@ -1828,10 +1828,10 @@ Rec obj;
 {
 obj = new Rec();
 {
-obj.dst = readInt(in);
+obj.dst = in.readShort();
 }
 {
-obj.via = readInt(in);
+obj.via = in.readShort();
 }
 }
 return obj;}
@@ -1840,13 +1840,13 @@ Msg obj;
 {
 obj = new Msg();
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 return obj;}
@@ -1871,13 +1871,13 @@ obj.port = readInt(in);
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -1887,7 +1887,7 @@ Init obj;
 {
 obj = new Init();
 {
-obj.id = readInt(in);
+obj.id = in.readShort();
 }
 {
 obj.members = new ArrayList<NodeInfo>();
@@ -1896,7 +1896,7 @@ NodeInfo x;
 {
 x = new NodeInfo();
 {
-x.id = readInt(in);
+x.id = in.readShort();
 }
 {
 x.port = readInt(in);
@@ -1919,13 +1919,13 @@ obj.members.add(x);
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -1941,7 +1941,7 @@ NodeInfo x;
 {
 x = new NodeInfo();
 {
-x.id = readInt(in);
+x.id = in.readShort();
 }
 {
 x.port = readInt(in);
@@ -1963,20 +1963,20 @@ obj.members.add(x);
 }
 }
 {
-obj.numNodes = readInt(in);
+obj.numNodes = in.readShort();
 }
 {
-obj.yourId = readInt(in);
+obj.yourId = in.readShort();
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -1992,10 +1992,10 @@ Rec x;
 {
 x = new Rec();
 {
-x.dst = readInt(in);
+x.dst = in.readShort();
 }
 {
-x.via = readInt(in);
+x.via = in.readShort();
 }
 }
 obj.recs.add(x);
@@ -2003,13 +2003,13 @@ obj.recs.add(x);
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -2024,7 +2024,7 @@ obj.time = in.readLong();
 {
 obj.info = new NodeInfo();
 {
-obj.info.id = readInt(in);
+obj.info.id = in.readShort();
 }
 {
 obj.info.port = readInt(in);
@@ -2044,13 +2044,13 @@ byte[] buf;
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -2064,13 +2064,13 @@ obj.time = in.readLong();
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -2089,13 +2089,13 @@ obj.probeTable[i] = in.readShort();
 }
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -2106,13 +2106,13 @@ MemberPoll obj;
 obj = new MemberPoll();
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }
@@ -2123,13 +2123,13 @@ PeeringRequest obj;
 obj = new PeeringRequest();
 {
 {
-obj.src = readInt(in);
+obj.src = in.readShort();
 }
 {
-obj.version = readInt(in);
+obj.version = in.readShort();
 }
 {
-obj.session = readInt(in);
+obj.session = in.readShort();
 }
 }
 }

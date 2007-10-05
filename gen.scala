@@ -14,12 +14,12 @@ object GenIo {
   }
   def Type(name: String, fieldStr: String): Type = Type(name, fieldStr, Array[Type]())
   val types = Array(
-    Type("NodeInfo",         "int id, int port, InetAddress addr"),
-    Type("Rec",              "int dst, int via"),
-    Type("Msg",              "int src, int version, int session", Array(
+    Type("NodeInfo",         "short id, int port, InetAddress addr"),
+    Type("Rec",              "short dst, short via"),
+    Type("Msg",              "short src, short version, short session", Array(
       Type("Join",           "InetAddress addr, int port"),
-      Type("Init",           "int id, ArrayList<NodeInfo> members"),
-      Type("Membership",     "ArrayList<NodeInfo> members, int numNodes, int yourId"),
+      Type("Init",           "short id, ArrayList<NodeInfo> members"),
+      Type("Membership",     "ArrayList<NodeInfo> members, short numNodes, short yourId"),
       Type("RoutingRecs",    "ArrayList<Rec> recs"),
       Type("Ping",           "long time, NodeInfo info"),
       Type("Pong",           "long time"),

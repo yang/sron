@@ -73,8 +73,8 @@ public class RonTest {
                 }
             }
         });
-        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
-        int nodeId = Integer.parseInt(props.getProperty("nodeId", "0"));
+        short numNodes = Short.parseShort(props.getProperty("numNodes", "3"));
+        short nodeId = Short.parseShort(props.getProperty("nodeId", "0"));
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         String simData = props.getProperty("simData", "");
 
@@ -101,7 +101,7 @@ public class RonTest {
                 throw new RuntimeException(ex);
             }
 
-            for (int i = 0; i <= numNodes; i++) {
+            for (short i = 0; i <= numNodes; i++) {
                 NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
                                                 numNodes, i == 0 ? semAllJoined : null, myCachedAddr,
                                                 coordinatorHost, coordNode);
@@ -145,8 +145,8 @@ public class RonTest {
             String line;
             while ((line = reader.readLine()) != null) {
                 String[] parts = line.split(" ");
-                final int src = Integer.parseInt(parts[0]);
-                final int dst = Integer.parseInt(parts[1]);
+                final short src = Short.parseShort(parts[0]);
+                final short dst = Short.parseShort(parts[1]);
                 double startTime = Double.parseDouble(parts[2]);
                 double stopTime = Double.parseDouble(parts[3]);
                 final ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
