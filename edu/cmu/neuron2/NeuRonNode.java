@@ -184,7 +184,7 @@ public class NeuRonNode extends Thread {
 
         try {
             String logFileBase = props.getProperty("logFileBase", "%t/scaleron-log-");
-            fh = new FileHandler(logFileBase + myNid, true);
+            fh = new FileHandler(logFileBase + myNid, false);
             fh.setFormatter(fmt);
             createLabelFilter(props, "fileLogFilter", fh);
             logger.addHandler(fh);
@@ -569,8 +569,22 @@ public class NeuRonNode extends Thread {
     public synchronized void ignore(int nid) {
         log("ignoring " + nid);
         ignored.add(nid);
+
         ArrayList<Integer> sorted_nids = memberNids();
         probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Integer.MAX_VALUE;
+
+        Integer nextHop = nextHopTable.get(nid);
+        if ((nextHop != null) && (nextHop == myNid)) {
+            nextHopTable.remove(nid);
+        }
+        HashSet<Integer> nhSet = nextHopOptions.get(nid);
+        if (nhSet != null) {
+            for (Iterator<Integer> it = nhSet.iterator(); it.hasNext();) {
+                if (it.next() == myNid) {
+                    it.remove();
+                }
+            }
+        }
     }
 
     public synchronized void unignore(int nid) {
@@ -953,10 +967,12 @@ public class NeuRonNode extends Thread {
                 Integer nextHop = nextHopTable.get(node.id);
                 if (nextHop == null) {
                     // new node !
+                    /*
                     newNextHopTable.put(node.id, myNid);
                     HashSet<Integer> nextHops = new HashSet<Integer>();
                     nextHops.add(myNid);
                     newNextHopOptions.put(node.id, nextHops);
+                    */
                 }
                 else {
                     // check if this old next hop is in the new membership list
@@ -966,7 +982,9 @@ public class NeuRonNode extends Thread {
                     }
                     else {
                         // the next hop vanaished. i am next hop to this node now
+                        /*
                         newNextHopTable.put(node.id, myNid);
+                        */
                     }
                     // of all the possible next hop options to the node,
                     // remove those that are dead.
@@ -980,9 +998,11 @@ public class NeuRonNode extends Thread {
                        }
                        newNextHopOptions.put(node.id, nextHops);
                     } else {
+                        /*
                         HashSet<Integer> nh = new HashSet<Integer>();
                         nextHops.add(myNid);
                         newNextHopOptions.put(node.id, nh);
+                        */
                     }
                 }
             }
@@ -1047,13 +1067,13 @@ public class NeuRonNode extends Thread {
                             if (neighbor.isAlive && !ignored.contains(neighbor.id)) {
                                 neighborSet.add(neighbor);
                             } else if (scheme != RoutingScheme.SQRT_NOFAILOVER) {
-                                log("R node failover!");
                                 // for each node in this row that's not me
                                 for (int i = 0; i < numRows; i++) {
                                     if ( (i != r) && ((grid[i][c].isAlive == false) ||  ignored.contains(grid[i][c].id)) ) {
                                         /* (r, x) and (i, c) can't be reached
                                          * (i, x) needs a failover R node
                                          */
+                                        log("R node failover!");
                                         boolean bFoundReplacement = false;
                                         // within that failure column, search for a failover
                                         for (int j = 0; j < numCols; j++) {
@@ -1209,6 +1229,32 @@ public class NeuRonNode extends Thread {
         log(s);
     }
 
+    private void printProbeTable() {
+        ArrayList<Integer> sorted_nids = memberNids();
+        int myIndex = sorted_nids.indexOf(myNid);
+
+        String s = new String("Adj table for " + myNid
+                + " = [");
+        for (int i = 0; i < probeTable[myIndex].length; i++) {
+            s += sorted_nids.get(i) + ":" + probeTable[myIndex][i] + "; ";
+        }
+        s += "]";
+        log(s);
+    }
+
+    private void printProbeTable(int probeTableOffset) {
+        ArrayList<Integer> sorted_nids = memberNids();
+
+        String s = new String("Adj table for " + sorted_nids.get(probeTableOffset)
+                + " = [");
+        for (int i = 0; i < probeTable[probeTableOffset].length; i++) {
+            s += sorted_nids.get(i) + ":" + probeTable[probeTableOffset][i] + "; ";
+        }
+        s += "]";
+        log(s);
+    }
+
+
     /**
      * for each neighbor, find for him the min-cost hops to all other neighbors,
      * and send this info to him (the intermediate node may be one of the
@@ -1241,6 +1287,13 @@ public class NeuRonNode extends Thread {
                     rec.dst = dst.id;
                     rec.via = sortedNids.get(mini);
                     recs.add(rec);
+
+                    /*
+                    /// DEBUG
+                    if ( (myNid == 2) && (src.id == 1) && (dst.id == 3) ) {
+                        System.out.println("Reco : " + src.id + "->" + rec.via + "->" + dst.id);
+                    }
+                    */
                 }
             }
             RoutingRecs msg = new RoutingRecs();
@@ -1402,6 +1455,7 @@ public class NeuRonNode extends Thread {
             totalSize += sendObject(rm, neighbor.id);
         }
         log("Sending measurements to neighbors, total " + totalSize + " bytes. " + toStringNeighborList());
+        //printProbeTable();
     }
 
     private void updateNetworkState(Measurements m) {
@@ -1419,6 +1473,7 @@ public class NeuRonNode extends Thread {
                 probeTable[offset][i] = m.probeTable[i];
             }
         }
+        //printProbeTable(offset);
     }
 
     private void handleRecommendation(ArrayList<Rec> recs) {
@@ -1430,19 +1485,30 @@ public class NeuRonNode extends Thread {
                 // For the algorithm where the R-points only send recos about
                 // everyone else this logic will have to be more complex
                 // (like check if the reco was better)
-                nextHopTable.put(r.dst, r.via);
 
-                if (r.via == 0) log("%%%%%%%%%%%%%%%%%%%%%% " + r.dst + " " + r.via);
+                if ( (!ignored.contains(r.via)) || ((r.via == myNid) && !ignored.contains(r.dst)) ) {
+                    nextHopTable.put(r.dst, r.via);
 
-                HashSet<Integer> nextHops = nextHopOptions.get(r.dst);
-                if (nextHops == null) {
-                    nextHops = new HashSet<Integer>();
-                    nextHopOptions.put(r.dst, nextHops);
+
+                    /*
+                    /// DEBUG
+                    if (myNid == 1) {
+                        System.out.println("GOOOOOOOOOOOO " + r.dst + " VIAAAAA " + r.via);
+                        log("GOOOOOOOOOOOO " + r.dst + " VIAAAAA " + r.via);
+                    }
+                    */
+
+                    HashSet<Integer> nextHops = nextHopOptions.get(r.dst);
+                    if (nextHops == null) {
+                        nextHops = new HashSet<Integer>();
+                        nextHopOptions.put(r.dst, nextHops);
+                    }
+                    nextHops.add(r.via);
                 }
-                nextHops.add(r.via);
             }
         }
 
+        // remove later !!!
         log(toStringNextHopTable());
         int reachable = 0;
         int oneHopPathsAvailable = 0;
@@ -1468,8 +1534,26 @@ public class NeuRonNode extends Thread {
                         oneHopPathsAvailable++;
                     }
                 }
+                if (!nhSet.contains(myNid) && !ignored.contains(nid)) {
+                    oneHopPathsAvailable++;
+                }
             }
         }
+
+        // this crap is needed because if eveyone but one member (X) in your row has died
+        // then there is no one to tell you about X
+        Set<Integer> knownMembers = new HashSet<Integer>(nodes.keySet());
+        Set<Integer> recoBasedReachableMembers = nextHopTable.keySet();
+
+        knownMembers.removeAll(recoBasedReachableMembers);
+        for (int nid : knownMembers) {
+            if (!ignored.contains(nid) && (nid != myNid)) {
+                reachable++;
+                oneHopPathsAvailable++;
+            }
+        }
+
+
         int avgOneHopsAvailable = oneHopPathsAvailable / reachable;
         log("Reachability Count = " + reachable + " of " + (nodes.size() - 1)
                 + " nodes in 1 or less hops.");
