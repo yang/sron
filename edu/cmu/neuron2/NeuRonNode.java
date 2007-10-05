@@ -120,6 +120,8 @@ public class NeuRonNode extends Thread {
 
     private final Hashtable<Integer,Long> lastSentMbr = new Hashtable<Integer,Long>();
 
+    private final double smoothingFactor;
+
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         String[] labels = props.getProperty(labelSet, defaultLabelSet).split(" ");
         final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
@@ -166,6 +168,8 @@ public class NeuRonNode extends Thread {
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         failoverTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + timeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
+
+        smoothingFactor = Double.parseDouble(props.getProperty("smoothingFactor", "0.9"));
 
         Formatter fmt = new Formatter() {
             public String format(LogRecord record) {
@@ -761,8 +765,10 @@ public class NeuRonNode extends Thread {
                                     resetTimeoutAtNode(pong.src);
                                     int rtt = (int) (System.currentTimeMillis() - pong.time);
                                     ArrayList<Integer> sortedNids = memberNids();
-                                    probeTable[sortedNids.indexOf(myNid)][sortedNids.indexOf(pong.src)]
-                                                                            = rtt / 2;
+                                    int i = sortedNids.indexOf(myNid), j = sortedNids.indexOf(pong.src);
+                                    probeTable[i][j] = (int) (
+                                            smoothingFactor * (rtt / 2) +
+                                            (1 - smoothingFactor) * probeTable[i][j]);
                                 }
                             } else if (msg instanceof PeeringRequest) {
                                 PeeringRequest pr = (PeeringRequest) msg;
