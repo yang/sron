@@ -573,6 +573,7 @@ public class NeuRonNode extends Thread {
         log("ignoring " + nid);
         ignored.add(nid);
 
+        /*
         ArrayList<Short> sorted_nids = memberNids();
         probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Short.MAX_VALUE;
 
@@ -588,6 +589,7 @@ public class NeuRonNode extends Thread {
                 }
             }
         }
+        */
     }
 
     public synchronized void unignore(short nid) {
@@ -759,16 +761,14 @@ public class NeuRonNode extends Thread {
                             } else if (msg instanceof Ping) {
                                 // nothing to do, already handled above
                             } else if (msg instanceof Pong) {
-                                if (!ignored.contains(msg.src)) {
-                                    Pong pong = (Pong) msg;
-                                    resetTimeoutAtNode(pong.src);
-                                    short rtt = (short) (System.currentTimeMillis() - pong.time);
-                                    ArrayList<Short> sortedNids = memberNids();
-                                    int i = sortedNids.indexOf(myNid), j = sortedNids.indexOf(pong.src);
-                                    probeTable[i][j] = (short) (
-                                            smoothingFactor * (rtt / 2) +
-                                            (1 - smoothingFactor) * probeTable[i][j]);
-                                }
+                                Pong pong = (Pong) msg;
+                                resetTimeoutAtNode(pong.src);
+                                short rtt = (short) (System.currentTimeMillis() - pong.time);
+                                ArrayList<Short> sortedNids = memberNids();
+                                int i = sortedNids.indexOf(myNid), j = sortedNids.indexOf(pong.src);
+                                probeTable[i][j] = (short) (
+                                                            smoothingFactor * (rtt / 2) +
+                                                            (1 - smoothingFactor) * probeTable[i][j]);
                             } else if (msg instanceof PeeringRequest) {
                                 PeeringRequest pr = (PeeringRequest) msg;
                                 GridNode newNeighbor = new GridNode();
@@ -1064,39 +1064,40 @@ public class NeuRonNode extends Thread {
                     // belong to us :)
 
                     // O(N^1.5)   :(
-                    // for each node in this column that's not me
+                    // for each node in this row that's not me
                     for (short x = 0; x < numCols; x++) {
                         if (grid[r][x].id != myNid) {
                             GridNode neighbor = grid[r][x];
                             // if they're alive, then add them a neighbor and move on
-                            if (neighbor.isAlive && !ignored.contains(neighbor.id)) {
+                            if (neighbor.isAlive) {
                                 neighborSet.add(neighbor);
                             } else if (scheme != RoutingScheme.SQRT_NOFAILOVER) {
-                                // for each node in this row that's not me
+                                // for each node in this col that's not me, check for another failed node
                                 for (short i = 0; i < numRows; i++) {
-                                    if ( (i != r) && ((grid[i][c].isAlive == false) ||  ignored.contains(grid[i][c].id)) ) {
+                                    if ( (i != r) && (grid[i][c].isAlive == false) ) {
                                         /* (r, x) and (i, c) can't be reached
                                          * (i, x) needs a failover R node
                                          */
                                         log("R node failover!");
                                         boolean bFoundReplacement = false;
-                                        // within that failure column, search for a failover
+                                        // search for a failover in row i
                                         for (short j = 0; j < numCols; j++) {
-                                            if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) && !ignored.contains(grid[i][j].id)) {
+                                            if ( (grid[i][j].id != myNid) && (grid[i][j].isAlive == true) ) {
                                                 // request them as a failover and add them as a neighbor
                                                 PeeringRequest pr = new PeeringRequest();
                                                 sendObject(pr, grid[i][j].id);
                                                 neighborSet.add(grid[i][j]);
                                                 log("Failing over (Row) to node " + grid[i][j] + " as R node for node " + grid[i][x]);
                                                 bFoundReplacement = true;
+                                                // TODO :: maybe maintain a table with failovers, or something similar to that.
                                                 break;
                                             }
                                         }
                                         // if no failover found
                                         if ((bFoundReplacement == false) && ((scheme == RoutingScheme.SQRT_RC_FAILOVER) || (scheme == RoutingScheme.SQRT_SPECIAL))) {
-                                            // within that failure row, search for a failover
+                                            // search for a failover in column x
                                             for (short j = 0; j < numRows; j++) {
-                                                if ( (grid[j][x].id != myNid) && (grid[j][x].isAlive == true) && !ignored.contains(grid[j][x].id)) {
+                                                if ( (grid[j][x].id != myNid) && (grid[j][x].isAlive == true) ) {
                                                     // request them as a failover and add them as a neighbor
                                                     PeeringRequest pr = new PeeringRequest();
                                                     sendObject(pr, grid[j][x].id);
@@ -1121,6 +1122,7 @@ public class NeuRonNode extends Thread {
 
             }
         }
+        neighborSet.addAll(overflowNeighbors);
         return neighborSet;
     }
 
@@ -1267,7 +1269,6 @@ public class NeuRonNode extends Thread {
      */
     private void broadcastRecommendations() {
         HashSet<GridNode> nl = getNeighborList();
-        nl.addAll(overflowNeighbors);
         overflowNeighbors.clear();
         ArrayList<Short> sortedNids = memberNids();
         int totalSize = 0;
@@ -1292,13 +1293,6 @@ public class NeuRonNode extends Thread {
                     rec.dst = dst.id;
                     rec.via = sortedNids.get(mini);
                     recs.add(rec);
-
-                    /*
-                    /// DEBUG
-                    if ( (myNid == 2) && (src.id == 1) && (dst.id == 3) ) {
-                        System.out.println("Reco : " + src.id + "->" + rec.via + "->" + dst.id);
-                    }
-                    */
                 }
             }
             RoutingRecs msg = new RoutingRecs();
@@ -1315,7 +1309,6 @@ public class NeuRonNode extends Thread {
      */
     private void broadcastRecommendations2() {
         HashSet<GridNode> nl = getNeighborList();
-        nl.addAll(overflowNeighbors);
         overflowNeighbors.clear();
         ArrayList<Short> sortedNids = memberNids();
 
@@ -1365,7 +1358,7 @@ public class NeuRonNode extends Thread {
                     }
                     Rec rec = new Rec();
                     rec.dst = dst.id;
-                    rec.via = (short)mini;
+                    rec.via = (short) sortedNids.get(mini);
                     recs.add(rec);
                 }
             }
@@ -1416,24 +1409,15 @@ public class NeuRonNode extends Thread {
             String who = nid >= 0 ? "" + nid : (addr + ":" + port);
             log("send." + o.getClass().getSimpleName(),
                     "to " + who + " len " + buf.length);
-            sendSocket.send(new DatagramPacket(buf, buf.length, addr, port));
+            if (!ignored.contains(nid)) {
+                sendSocket.send(new DatagramPacket(buf, buf.length, addr, port));
+            } else {
+                log("droppng packet sent to " + who);
+            }
             return buf.length;
         } catch (Exception ex) {
             throw new RuntimeException(ex);
         }
-
-        /*
-          leave this commented region here
-          This is was not a good idea because it would open a new socket every time.
-          we now instead use a single socket (sendSocket).
-        */
-//            new DatagramConnector().connect(new InetSocketAddress(node.addr, node.port),
-//                                            new IoHandlerAdapter() {
-//                @Override
-//                public void sessionCreated(IoSession session) {
-//                    session.write(o); // TODO :: need custom serialization
-//                }
-//            }, cfg);
     }
 
     private int sendObject(final Msg o, NodeInfo info, short nid) {
@@ -1486,22 +1470,14 @@ public class NeuRonNode extends Thread {
             for (Rec r : recs) {
                 // For the algorithm where the R-points only send recos about their neighbors:
                 // For each dst - only 2 nodes can tell us about the best hop to dst.
-                // They are out R-points. Trust them and update your entry blindly.
-                // For the algorithm where the R-points only send recos about
+                // They are our R-points. Trust them and update your entry blindly.
+                // For the algorithm where the R-points send recos about
                 // everyone else this logic will have to be more complex
                 // (like check if the reco was better)
 
-                if ( (!ignored.contains(r.via)) || ((r.via == myNid) && !ignored.contains(r.dst)) ) {
+                if ( isReachable(r.via) || ((r.via == myNid) && isReachable(r.dst)) )
+                {
                     nextHopTable.put(r.dst, r.via);
-
-
-                    /*
-                    /// DEBUG
-                    if (myNid == 1) {
-                        System.out.println("GOOOOOOOOOOOO " + r.dst + " VIAAAAA " + r.via);
-                        log("GOOOOOOOOOOOO " + r.dst + " VIAAAAA " + r.via);
-                    }
-                    */
 
                     HashSet<Short> nextHops = nextHopOptions.get(r.dst);
                     if (nextHops == null) {
@@ -1513,57 +1489,147 @@ public class NeuRonNode extends Thread {
             }
         }
 
-        // remove later !!!
-        log(toStringNextHopTable());
-        int reachable = 0;
-        int oneHopPathsAvailable = 0;
-        for (short nid : nextHopTable.keySet()) {
-            int nextHop = nextHopTable.get(nid);
-            if (nextHop != myNid) {
-                if (!ignored.contains(nextHop)) {
-                    reachable++;
+        countReachableNodes();
+    }
+
+    private boolean isReachable(short nid) {
+        ArrayList<Short> sortedNids = memberNids();
+        int i = sortedNids.indexOf(myNid);
+        int j = sortedNids.indexOf(nid);
+
+        if ((j != -1) && (probeTable[i][j] != Short.MAX_VALUE)) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean isReachable(short neighbor_src, int nid_dst) {
+        ArrayList<Short> sortedNids = memberNids();
+        int i = sortedNids.indexOf(neighbor_src);
+        int j = sortedNids.indexOf(nid_dst);
+
+        if ( (i != -1) && (j != -1) && (probeTable[i][j] != Short.MAX_VALUE)) {
+            return true;
+        }
+        return false;
+    }
+
+    private void countReachableNodes() {
+
+        ArrayList<Short> sortedNids = memberNids();
+
+
+        // for each node in the system
+
+        // reachability
+        //    - either it is in the nexthop table
+        //      or we can reach it directly
+        //      or we can reach it using our neighbors (in their adj table)
+
+        // # of one-hop paths available
+        //    - is this needed?
+
+
+        int numReachable = 0;
+        for (Short nid : sortedNids) {
+            Short nextHop = nextHopTable.get(nid);
+
+            boolean canReach = false;
+
+            if (nextHop != null) {
+                if (nextHop != myNid) {
+                    if (isReachable(nextHop)) {
+                        numReachable++;
+                        canReach = true;
+                    }
+                } else if (isReachable(nid)) {
+                    numReachable++;
+                    canReach = true;
                 } else {
-                    //log("@@@ not considering " + nextHop);
+                    // TODO :: what do we do here?
+                    // right now it falls through and searches in the other cases
+                    // as canReach is false
+                    // but is this correct?
                 }
-            } else if (!ignored.contains(nid)) {
-                reachable++;
-            } else {
-                //log("$$$ not considering " + nextHop);
             }
 
-            HashSet<Short> nhSet = nextHopOptions.get(nid);
-            if (nhSet != null) {
-                for (Iterator<Short> it = nhSet.iterator(); it.hasNext();) {
-                    Short someNextHop = it.next();
-                    if (!ignored.contains(someNextHop)) {
-                        oneHopPathsAvailable++;
+            if (!canReach) {
+                // there was no next hop to take you there
+                // can you reach nid directly?
+
+                if (isReachable(nid)) {
+                    numReachable++;
+                    canReach = true;
+                } else {
+                    // look through the adj tables of your neighbors and
+                    // see if they can reach nid - even though nid might not be their neighbor
+                    HashSet<GridNode> nl = getNeighborList();
+                    // cycle through the probe table
+                    // and fine if neighbor is reachable from me && nid is reachable from neighbor
+                    for (GridNode neighbor : nl) {
+                        if (isReachable(neighbor.id) && isReachable(neighbor.id, nid)) {
+                            numReachable++;
+                            canReach = true;
+                            break;
+                        }
                     }
                 }
-                if (!nhSet.contains(myNid) && !ignored.contains(nid)) {
-                    oneHopPathsAvailable++;
-                }
             }
-        }
 
-        // this crap is needed because if eveyone but one member (X) in your row has died
-        // then there is no one to tell you about X
-        Set<Short> knownMembers = new HashSet<Short>(nodes.keySet());
-        Set<Short> recoBasedReachableMembers = nextHopTable.keySet();
-
-        knownMembers.removeAll(recoBasedReachableMembers);
-        for (short nid : knownMembers) {
-            if (!ignored.contains(nid) && (nid != myNid)) {
-                reachable++;
-                oneHopPathsAvailable++;
-            }
         }
 
 
-        int avgOneHopsAvailable = oneHopPathsAvailable / reachable;
-        log("Reachability Count = " + reachable + " of " + (nodes.size() - 1)
+//    	// remove log call later !!!
+//        log(toStringNextHopTable());
+//        int reachable = 0;
+//        int oneHopPathsAvailable = 0;
+//        for (short nid : nextHopTable.keySet()) {
+//            int nextHop = nextHopTable.get(nid);
+//            if (nextHop != myNid) {
+//                if (isReachable(nextHop)) {
+//                    reachable++;
+//                }
+//            } else if (isReachable(nid)) {
+//                reachable++;
+//            }
+//
+//            HashSet<Short> nhSet = nextHopOptions.get(nid);
+//            if (nhSet != null) {
+//                for (Iterator<Short> it = nhSet.iterator(); it.hasNext();) {
+//                    Short someNextHop = it.next();
+//                    if (isReachable(someNextHop)) {
+//                        oneHopPathsAvailable++;
+//                    }
+//                }
+//            }
+//
+//            int j = sortedNids.indexOf(nid);
+//
+//            // TODO ::
+//            // cycle through the probe table - if pt[me][someNeighbor] + pt[someNeighbor][nid] is not infinity
+//            // then add someNeighbor to the set of oneHops available if it is not already in the nhSet
+//        }
+//
+//        /*
+//        // this crap is needed because if eveyone but one member (X) in your row is unreachable
+//        // then there is no one to tell you about X
+//        Set<Short> knownMembers = new HashSet<Short>(nodes.keySet());
+//        Set<Short> recoBasedReachableMembers = nextHopTable.keySet();
+//
+//        knownMembers.removeAll(recoBasedReachableMembers);
+//        for (short nid : knownMembers) {
+//            if (!ignored.contains(nid) && (nid != myNid)) {
+//                reachable++;
+//                oneHopPathsAvailable++;
+//            }
+//        }
+//        */
+
+        log("Reachability Count = " + numReachable + " of " + (nodes.size() - 1)
                 + " nodes in 1 or less hops.");
-        log("Avg # of one hop or direct paths available = "
-                + avgOneHopsAvailable);
+
+        //int avgOneHopsAvailable = oneHopPathsAvailable / reachable;
+        //log("Avg # of one hop or direct paths available = " + avgOneHopsAvailable);
     }
 
     public void quit() {
@@ -1687,11 +1753,11 @@ class PeeringRequest extends Msg {
 }
 
       class Serialization {
-    
+
 
       public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
-      
+
 else if (obj.getClass() == NodeInfo.class) {
 NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
 out.writeShort(casted.id);
@@ -1720,7 +1786,7 @@ out.writeShort(casted.session);
 else if (obj.getClass() == Init.class) {
 Init casted = (Init) obj; out.writeInt(4);
 out.writeShort(casted.id);
- out.writeInt(casted.members.size()); 
+ out.writeInt(casted.members.size());
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeShort(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -1732,7 +1798,7 @@ out.writeShort(casted.session);
 }
 else if (obj.getClass() == Membership.class) {
 Membership casted = (Membership) obj; out.writeInt(5);
- out.writeInt(casted.members.size()); 
+ out.writeInt(casted.members.size());
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeShort(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -1746,7 +1812,7 @@ out.writeShort(casted.session);
 }
 else if (obj.getClass() == RoutingRecs.class) {
 RoutingRecs casted = (RoutingRecs) obj; out.writeInt(6);
- out.writeInt(casted.recs.size()); 
+ out.writeInt(casted.recs.size());
 for (int i = 0; i < casted.recs.size(); i++) {
 out.writeShort(casted.recs.get(i).dst);
 out.writeShort(casted.recs.get(i).via);
@@ -1798,7 +1864,7 @@ out.writeShort(casted.session);
 
       public Object deserialize(DataInputStream in) throws IOException {
       switch (readInt(in)) {
-    
+
 case 0: { // NodeInfo
 NodeInfo obj;
 {
@@ -1815,11 +1881,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         obj.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 return obj;}
@@ -1860,11 +1926,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         obj.addr = InetAddress.getByAddress(buf);
-        
+
 }
 {
 obj.port = readInt(in);
@@ -1907,11 +1973,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         x.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 obj.members.add(x);
@@ -1952,11 +2018,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         x.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 obj.members.add(x);
@@ -2035,11 +2101,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         obj.info.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 {
