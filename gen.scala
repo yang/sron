@@ -38,7 +38,7 @@ object GenIo {
     "InetAddress" -> "java.net.InetAddress",
     "ArrayList" -> "java.util.ArrayList"
   )
-  val primitives = Map("int" -> "Int", "long" -> "Long", "byte" -> "Byte")
+  val primitives = Map("int" -> "Int", "long" -> "Long", "byte" -> "Byte", "short" -> "Short")
   val castables = Map("Integer" -> "int")
   def isPrimitive(x: String) = primitives contains x
   def nested(x: String) = (x split "[<>]")(1)

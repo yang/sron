@@ -1640,6 +1640,7 @@ class GridNode {
 
 
 
+
 class NodeInfo  {
 int id;
 int port;
@@ -1686,11 +1687,11 @@ class PeeringRequest extends Msg {
 }
 
       class Serialization {
-
+    
 
       public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
-
+      
 else if (obj.getClass() == NodeInfo.class) {
 NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
 out.writeInt(casted.id);
@@ -1719,7 +1720,7 @@ out.writeInt(casted.session);
 else if (obj.getClass() == Init.class) {
 Init casted = (Init) obj; out.writeInt(4);
 out.writeInt(casted.id);
- out.writeInt(casted.members.size());
+ out.writeInt(casted.members.size()); 
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeInt(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -1731,7 +1732,7 @@ out.writeInt(casted.session);
 }
 else if (obj.getClass() == Membership.class) {
 Membership casted = (Membership) obj; out.writeInt(5);
- out.writeInt(casted.members.size());
+ out.writeInt(casted.members.size()); 
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeInt(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -1745,7 +1746,7 @@ out.writeInt(casted.session);
 }
 else if (obj.getClass() == RoutingRecs.class) {
 RoutingRecs casted = (RoutingRecs) obj; out.writeInt(6);
- out.writeInt(casted.recs.size());
+ out.writeInt(casted.recs.size()); 
 for (int i = 0; i < casted.recs.size(); i++) {
 out.writeInt(casted.recs.get(i).dst);
 out.writeInt(casted.recs.get(i).via);
@@ -1797,7 +1798,7 @@ out.writeInt(casted.session);
 
       public Object deserialize(DataInputStream in) throws IOException {
       switch (readInt(in)) {
-
+    
 case 0: { // NodeInfo
 NodeInfo obj;
 {
@@ -1814,11 +1815,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-
+        
 }
 
         obj.addr = InetAddress.getByAddress(buf);
-
+        
 }
 }
 return obj;}
@@ -1859,11 +1860,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-
+        
 }
 
         obj.addr = InetAddress.getByAddress(buf);
-
+        
 }
 {
 obj.port = readInt(in);
@@ -1906,11 +1907,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-
+        
 }
 
         x.addr = InetAddress.getByAddress(buf);
-
+        
 }
 }
 obj.members.add(x);
@@ -1951,11 +1952,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-
+        
 }
 
         x.addr = InetAddress.getByAddress(buf);
-
+        
 }
 }
 obj.members.add(x);
@@ -2034,11 +2035,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-
+        
 }
 
         obj.info.addr = InetAddress.getByAddress(buf);
-
+        
 }
 }
 {
