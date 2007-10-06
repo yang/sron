@@ -122,6 +122,8 @@ public class NeuRonNode extends Thread {
 
     private final double smoothingFactor;
 
+    private long numRoutingTableExchanges;
+
     private void createLabelFilter(Properties props, String labelSet, Handler handler) {
         String[] labels = props.getProperty(labelSet, defaultLabelSet).split(" ");
         final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
@@ -215,6 +217,8 @@ public class NeuRonNode extends Thread {
         }
 
         myPort = basePort + myNid;
+
+        numRoutingTableExchanges = 0;
     }
 
     private final int myPort;
@@ -524,6 +528,8 @@ public class NeuRonNode extends Thread {
                 new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, myPort),
                                             new Receiver(), cfg);
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
+
+                log("probePeriod = " + probePeriod);
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
                         synchronized (NeuRonNode.this) {
@@ -536,11 +542,15 @@ public class NeuRonNode extends Thread {
                             }
                         }
                     }
-                }, 1, probePeriod, TimeUnit.SECONDS);
+                }, 0, probePeriod, TimeUnit.SECONDS);
+
+
+                log("neighborBroadcastPeriod = " + neighborBroadcastPeriod);
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
                         synchronized (NeuRonNode.this) {
                             try {
+                            	numRoutingTableExchanges++;
                                 broadcastMeasurements();
                                 if (scheme != RoutingScheme.SIMPLE) {
                                     if (scheme == RoutingScheme.SQRT_SPECIAL) {
@@ -556,6 +566,7 @@ public class NeuRonNode extends Thread {
                                 err(ex);
                             }
                         }
+                        log("numRoutingTableExchanges = " + numRoutingTableExchanges);
                     }
                 }, 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
                 if (semAllJoined != null) semAllJoined.release();
@@ -1166,7 +1177,10 @@ public class NeuRonNode extends Thread {
             if (i == nodeIndex) {
                 newProbeTable[i][i] = 0;
             } else {
-                newProbeTable[nodeIndex][i] = Short.MAX_VALUE;
+                //newProbeTable[nodeIndex][i] = Short.MAX_VALUE;
+
+            	// assume reachability initially - if not reachable, probes will figure this out
+            	newProbeTable[nodeIndex][i] = 1000;
             }
         }
 
@@ -1482,6 +1496,7 @@ public class NeuRonNode extends Thread {
 
     private void handleRecommendation(ArrayList<Rec> recs) {
         if (recs != null) {
+        	log("# of routing recs = " + recs.size());
             for (Rec r : recs) {
                 // For the algorithm where the R-points only send recos about their neighbors:
                 // For each dst - only 2 nodes can tell us about the best hop to dst.
@@ -1490,6 +1505,7 @@ public class NeuRonNode extends Thread {
                 // everyone else this logic will have to be more complex
                 // (like check if the reco was better)
 
+                //log(r.dst + "->" + r.via);
                 if ( isReachable(r.via) || ((r.via == myNid) && isReachable(r.dst)) )
                 {
                     nextHopTable.put(r.dst, r.via);
@@ -1512,7 +1528,8 @@ public class NeuRonNode extends Thread {
         int i = sortedNids.indexOf(myNid);
         int j = sortedNids.indexOf(nid);
 
-        if ((j != -1) && (probeTable[i][j] != Short.MAX_VALUE)) {
+        //log("me -> " + nid + " = " + probeTable[i][j]);
+        if ((j != -1) && (probeTable[i][j] < Short.MAX_VALUE)) {
             return true;
         }
         return false;
@@ -1545,53 +1562,53 @@ public class NeuRonNode extends Thread {
         ArrayList<Short> sortedNids = memberNids();
         HashSet<GridNode> nl = getNeighborList();
 
-        log("yo " + sortedNids.size());
         int numReachable = 0;
         for (Short nid : sortedNids) {
-            Short nextHop = nextHopTable.get(nid);
+	        if (nid != myNid) {
+	            Short nextHop = nextHopTable.get(nid);
 
-            boolean canReach = false;
+	            boolean canReach = false;
 
-            if (nextHop != null) {
-                if (nextHop != myNid) {
-                    if (isReachable(nextHop)) {
-                        numReachable++;
-                        canReach = true;
-                    }
-                } else if (isReachable(nid)) {
-                    numReachable++;
-                    canReach = true;
-                } else {
-                    // TODO :: what do we do here?
-                    // right now it falls through and searches in the other cases
-                    // as canReach is false
-                    // but is this correct?
-                }
-            }
+	            if (nextHop != null) {
+	                if (nextHop != myNid) {
+	                    if (isReachable(nextHop)) {
+	                        numReachable++;
+	                        canReach = true;
+	                    }
+	                } else if (isReachable(nid)) {
+	                    numReachable++;
+	                    canReach = true;
+	                } else {
+	                    // TODO :: what do we do here?
+	                    // right now it falls through and searches in the other cases
+	                    // as canReach is false
+	                    // but is this correct?
+	                }
+	            }
 
-            if (!canReach) {
-                // there was no next hop to take you there
-                // can you reach nid directly?
+	            if (!canReach) {
+	                // there was no next hop to take you there
+	                // can you reach nid directly?
 
-                if (isReachable(nid)) {
-                    numReachable++;
-                    canReach = true;
-                } else {
-                    // look through the adj tables of your neighbors and
-                    // see if they can reach nid - even though nid might not be their neighbor
+	                if (isReachable(nid)) {
+	                    numReachable++;
+	                    canReach = true;
+	                } else {
+	                    // look through the adj tables of your neighbors and
+	                    // see if they can reach nid - even though nid might not be their neighbor
 
-                	// cycle through the probe table
-                    // and fine if neighbor is reachable from me && nid is reachable from neighbor
-                    for (GridNode neighbor : nl) {
-                        if (isReachable(neighbor.id) && isReachable(neighbor.id, nid)) {
-                            numReachable++;
-                            canReach = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
+	                	// cycle through the probe table
+	                    // and fine if neighbor is reachable from me && nid is reachable from neighbor
+	                    for (GridNode neighbor : nl) {
+	                        if (isReachable(neighbor.id) && isReachable(neighbor.id, nid)) {
+	                            numReachable++;
+	                            canReach = true;
+	                            break;
+	                        }
+	                    }
+	                }
+	            }
+	        }
         }
 
 
