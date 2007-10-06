@@ -104,7 +104,7 @@ object GenIo {
   def genWrite(typ: String, value: String) {
     typ match {
       case x if isPrimitive(x) => println(<p>out.write{primitives(typ)}({value});</p>.text)
-      case "Array<byte>" => println(<p>out.write({value});</p>.text)
+      case "Array<byte>" => println(<p>out.writeInt({value}.length);out.write({value});</p>.text)
       case x if x startsWith "Array<" => {
         println(<p>out.writeInt({value}.length);</p>.text)
         println("for (int i = 0; i < " + value + ".length; i++) {")
