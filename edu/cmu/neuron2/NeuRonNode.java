@@ -156,7 +156,7 @@ public class NeuRonNode extends Thread {
 
         basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
-        neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "10"));
+        neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
         if (mode == RunMode.SIM) {
@@ -351,6 +351,7 @@ public class NeuRonNode extends Thread {
                 Thread.sleep(2000);
                 new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
                         .getLocalHost(), basePort), new CoordReceiver(), cfg);
+                System.out.println("allllll");
                 ServerSocket ss = new ServerSocket(basePort);
                 try {
                     // TODO the coord should also be kept aware of who's alive
@@ -380,6 +381,7 @@ public class NeuRonNode extends Thread {
                                     Join msg = (Join) new Serialization().deserialize(new DataInputStream(incoming.getInputStream()));
 
                                     synchronized (NeuRonNode.this) {
+                                        System.out.println("delta");
                                         incomingSocks.put(nodeId, incoming);
                                         if (!capJoins || nodes.size() < numNodesHint) {
                                             addMember(nodeId, msg.addr, msg.port, msg.src);
@@ -413,6 +415,7 @@ public class NeuRonNode extends Thread {
                                         }
                                     }
                                 } catch (Exception ex) {
+                                    System.out.println("epsilon");
                                     err(ex);
                                 } finally {
                                     try {
@@ -444,15 +447,17 @@ public class NeuRonNode extends Thread {
                         });
                     }
                 } finally {
+                    System.out.println("gamma");
                     ss.close();
                     log("coord done");
                 }
             } catch (Exception ex) {
+                System.out.println("beta");
                 throw new RuntimeException(ex);
             }
         } else {
             try {
-                Socket s;
+                Socket s = null;
                 long startTime = System.currentTimeMillis();
                 int count = 0;
                 while (true) {
@@ -465,6 +470,7 @@ public class NeuRonNode extends Thread {
                     // Connect to the co-ordinator
                     try {
                         s = new Socket(coordinatorHost, basePort);
+                        //if (count > 0) throw new Exception();
                         break;
                     } catch (Exception ex) {
                         log("couldn't connect to coord, retrying in 1 sec: " + ex.getMessage());
@@ -1438,6 +1444,7 @@ public class NeuRonNode extends Thread {
         //rm.membershipList = memberNids();
         ArrayList<Short> sorted_nids = memberNids();
         rm.probeTable = probeTable[sorted_nids.indexOf(myNid)].clone();
+        rm.inflation = new byte[rm.probeTable.length];
         HashSet<GridNode> nl = getNeighborList();
         int totalSize = 0;
         for (GridNode neighbor : nl) {
@@ -1746,6 +1753,7 @@ long time;
 }
 class Measurements extends Msg {
 short[] probeTable;
+byte[] inflation;
 }
 class MemberPoll extends Msg {
 }
@@ -1844,6 +1852,7 @@ out.writeInt(casted.probeTable.length);
 for (int i = 0; i < casted.probeTable.length; i++) {
 out.writeShort(casted.probeTable[i]);
 }
+out.write(casted.inflation);
 out.writeShort(casted.src);
 out.writeShort(casted.version);
 out.writeShort(casted.session);
@@ -2152,6 +2161,12 @@ for (int i = 0; i < obj.probeTable.length; i++) {
 obj.probeTable[i] = in.readShort();
 }
 }
+}
+{
+
+          obj.inflation = new byte[readInt(in)];
+          in.read(obj.inflation);
+        
 }
 {
 {
