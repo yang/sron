@@ -1523,9 +1523,6 @@ public class NeuRonNode extends Thread {
 
     private void countReachableNodes() {
 
-        ArrayList<Short> sortedNids = memberNids();
-
-
         // for each node in the system
 
         // reachability
@@ -1536,6 +1533,8 @@ public class NeuRonNode extends Thread {
         // # of one-hop paths available
         //    - is this needed?
 
+        ArrayList<Short> sortedNids = memberNids();
+        HashSet<GridNode> nl = getNeighborList();
 
         int numReachable = 0;
         for (Short nid : sortedNids) {
@@ -1570,8 +1569,8 @@ public class NeuRonNode extends Thread {
                 } else {
                     // look through the adj tables of your neighbors and
                     // see if they can reach nid - even though nid might not be their neighbor
-                    HashSet<GridNode> nl = getNeighborList();
-                    // cycle through the probe table
+
+                	// cycle through the probe table
                     // and fine if neighbor is reachable from me && nid is reachable from neighbor
                     for (GridNode neighbor : nl) {
                         if (isReachable(neighbor.id) && isReachable(neighbor.id, nid)) {
