@@ -159,11 +159,7 @@ public class NeuRonNode extends Thread {
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
-        if (mode == RunMode.SIM) {
-            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "60"));
-        } else {
-            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
-        }
+        probePeriod = Integer.parseInt(props.getProperty("probePeriod", "15"));
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         failoverTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + timeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
@@ -246,10 +242,6 @@ public class NeuRonNode extends Thread {
     }
 
     private void log(String msg) {
-        // the node id has to be logged here because
-        // the node id received in the constructor (and passed to Logger) is different
-        // from that in the InitMsg
-        // This is the correct node ID !!!
         logger.info(msg);
     }
 
@@ -1024,16 +1016,28 @@ public class NeuRonNode extends Thread {
         nextHopTable = newNextHopTable; // forget about the old one
         nextHopOptions = newNextHopOptions;
 
-        repopulateGrid();
+        repopulateGrid(oldNids);
         repopulateProbeTable(oldNids);
         // printGrid();
         log("new state version: " + currentStateVersion);
         log(toStringNeighborList());
     }
 
-    private void repopulateGrid() {
+    private void repopulateGrid(List<Short> oldNids) {
+
+    	int oldNumCols = numCols;
+    	int oldNumRows = numRows;
+
         numCols = (short) Math.ceil(Math.sqrt(nodes.size()));
         numRows = (short) Math.ceil((double) nodes.size() / (double) numCols);
+
+        Hashtable<Short, GridNode> oldNidsTable = new Hashtable<Short, GridNode>(oldNids.size());
+        for (short i = 0; i < oldNumRows; i++) {
+            for (short j = 0; j < oldNumCols; j++) {
+            	oldNidsTable.put(grid[i][j].id, grid[i][j]);
+            }
+        }
+
         grid = new GridNode[numRows][numCols];
         List<Short> nids = memberNids();
         short m = 0;
@@ -1042,9 +1046,13 @@ public class NeuRonNode extends Thread {
                 if (m >= nids.size()) {
                     m = 0;
                 }
-                GridNode gn = new GridNode();
-                gn.id = nids.get(m);
-                gn.isAlive = true;
+
+                GridNode gn = oldNidsTable.get(nids.get(m));
+                if (gn == null) {
+                    gn = new GridNode();
+                    gn.id = nids.get(m);
+                    gn.isAlive = true;
+                }
                 grid[i][j] = gn;
                 m++;
             }
@@ -1533,9 +1541,11 @@ public class NeuRonNode extends Thread {
         // # of one-hop paths available
         //    - is this needed?
 
+    	log(toStringNextHopTable());
         ArrayList<Short> sortedNids = memberNids();
         HashSet<GridNode> nl = getNeighborList();
 
+        log("yo " + sortedNids.size());
         int numReachable = 0;
         for (Short nid : sortedNids) {
             Short nextHop = nextHopTable.get(nid);
@@ -2165,7 +2175,7 @@ obj.probeTable[i] = in.readShort();
 
           obj.inflation = new byte[readInt(in)];
           in.read(obj.inflation);
-        
+
 }
 {
 {
