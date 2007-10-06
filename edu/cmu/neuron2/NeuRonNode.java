@@ -529,6 +529,7 @@ public class NeuRonNode extends Thread {
                                             new Receiver(), cfg);
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
+                // STAT - IMP
                 log("probePeriod = " + probePeriod);
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
@@ -544,7 +545,7 @@ public class NeuRonNode extends Thread {
                     }
                 }, 0, probePeriod, TimeUnit.SECONDS);
 
-
+                // STAT - IMP
                 log("neighborBroadcastPeriod = " + neighborBroadcastPeriod);
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     public void run() {
@@ -566,6 +567,7 @@ public class NeuRonNode extends Thread {
                                 err(ex);
                             }
                         }
+	                    // STAT - IMP
                         log("numRoutingTableExchanges = " + numRoutingTableExchanges);
                     }
                 }, 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
@@ -863,6 +865,7 @@ public class NeuRonNode extends Thread {
                             }
                             ArrayList<Short> sorted_nids = memberNids();
                             probeTable[sorted_nids.indexOf(myNid)][sorted_nids.indexOf(nid)] = Short.MAX_VALUE;
+    	                    // STAT - IMP
                             log("probe timeout : Node " + nid + " is unreachable!");
                         }
                     } catch (Exception ex) {
@@ -1324,9 +1327,10 @@ public class NeuRonNode extends Thread {
                     rec.via = sortedNids.get(mini);
                     recs.add(rec);
 
-                    printProbeTable(srcOffset);
-                    printProbeTable(dstOffset);
-                    log(src.id + "->" + rec.via + "->" + rec.dst);
+                    // DEBUG - IMP
+                    //printProbeTable(srcOffset);
+                    //printProbeTable(dstOffset);
+                    //log(src.id + "->" + rec.via + "->" + rec.dst);
                 }
             }
             RoutingRecs msg = new RoutingRecs();
@@ -1373,6 +1377,11 @@ public class NeuRonNode extends Thread {
                     rec.dst = dst.id;
                     rec.via = sortedNids.get(mini);
                     recs.add(rec);
+
+                    // DEBUG - IMP
+                    //printProbeTable(srcOffset);
+                    //printProbeTable(dstOffset);
+                    //log(src.id + "->" + rec.via + "->" + rec.dst);
                 }
             }
 
@@ -1394,6 +1403,11 @@ public class NeuRonNode extends Thread {
                     rec.dst = dst.id;
                     rec.via = (short) sortedNids.get(mini);
                     recs.add(rec);
+
+                    // DEBUG - IMP
+                    //printProbeTable(srcOffset);
+                    //printProbeTable(dstOffset);
+                    //log(src.id + "->" + rec.via + "->" + rec.dst);
                 }
             }
 
@@ -1502,7 +1516,8 @@ public class NeuRonNode extends Thread {
 
     private void handleRecommendation(ArrayList<Rec> recs) {
         if (recs != null) {
-        	log("# of routing recs = " + recs.size());
+            // DEBUG - IMP
+        	//log("# of routing recs = " + recs.size());
             for (Rec r : recs) {
                 // For the algorithm where the R-points only send recos about their neighbors:
                 // For each dst - only 2 nodes can tell us about the best hop to dst.
@@ -1511,7 +1526,8 @@ public class NeuRonNode extends Thread {
                 // everyone else this logic will have to be more complex
                 // (like check if the reco was better)
 
-                log(r.dst + "->" + r.via);
+                // DEBUG - IMP
+                //log(r.dst + "->" + r.via);
                 if ( isReachable(r.via) || ((r.via == myNid) && isReachable(r.dst)) )
                 {
                     nextHopTable.put(r.dst, r.via);
@@ -1534,6 +1550,7 @@ public class NeuRonNode extends Thread {
         int i = sortedNids.indexOf(myNid);
         int j = sortedNids.indexOf(nid);
 
+        // DEBUG - IMP
         //log("me -> " + nid + " = " + probeTable[i][j]);
         if ((j != -1) && (probeTable[i][j] < Short.MAX_VALUE)) {
             return true;
@@ -1580,12 +1597,16 @@ public class NeuRonNode extends Thread {
 	                    if (isReachable(nextHop)) {
 	                        numReachable++;
 	                        canReach = true;
-		                	log("can reach " + nid + " using nextHop");
+
+	                        // DEBUG
+		                	//log("can reach " + nid + " using nextHop");
 	                    }
 	                } else if (isReachable(nid)) {
 	                    numReachable++;
 	                    canReach = true;
-	                	log("can reach " + nid + " directly (suggested by others)");
+
+	                    // DEBUG - IMP
+	                	//log("can reach " + nid + " directly (suggested by others)");
 	                } else {
 	                    // TODO :: what do we do here?
 	                    // right now it falls through and searches in the other cases
@@ -1601,7 +1622,9 @@ public class NeuRonNode extends Thread {
 	                if (isReachable(nid)) {
 	                    numReachable++;
 	                    canReach = true;
-	                	log("can reach " + nid + " directly (measurements)");
+
+	                    // DEBUG - IMP
+	                	//log("can reach " + nid + " directly (measurements)");
 	                } else {
 	                    // look through the adj tables of your neighbors and
 	                    // see if they can reach nid - even though nid might not be their neighbor
@@ -1612,7 +1635,9 @@ public class NeuRonNode extends Thread {
 	                        if (isReachable(neighbor.id) && isReachable(neighbor.id, nid)) {
 	                            numReachable++;
 	                            canReach = true;
-	    	                	log("can reach " + nid + "");
+
+	    	                    // DEBUG - IMP
+	                            //log("can reach " + nid + "using neighbor (by looking at neighbor's adj table)");
 	                            break;
 	                        }
 	                    }
