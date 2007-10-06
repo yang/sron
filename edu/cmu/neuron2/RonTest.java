@@ -107,8 +107,8 @@ public class RonTest {
                 NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
                                                 numNodes, i == 0 ? semAllJoined : null, myCachedAddr,
                                                 coordinatorHost, coordNode);
-                //node.start();
-                launcher.submit(node);
+                node.start();
+                //launcher.submit(node);
                 //if (i == 0) node.start();
                 //else node.run();
                 nodes.add(node);
