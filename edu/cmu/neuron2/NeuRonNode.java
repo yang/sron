@@ -936,7 +936,8 @@ public class NeuRonNode extends Thread {
         for (NodeInfo node : newNodes)
             if (!nodes.containsKey(node.id)) {
                 nodes.put(node.id, new NodeState(node));
-                resetTimeoutAtNode(node.id);
+                if (node.id != myNid)
+                    resetTimeoutAtNode(node.id);
             }
 
         // remove nodes
