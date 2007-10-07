@@ -126,7 +126,7 @@ public class NeuRonNode extends Thread {
     private short cachedMemberNidsVersion;
     private final boolean blockJoins;
     private final boolean capJoins;
-    private final int joinTimeLimit; // seconds
+    private final int joinRetries; // seconds
 
     private final int dumpPeriod;
 
@@ -187,7 +187,7 @@ public class NeuRonNode extends Thread {
         origNid = id;
         currentStateVersion = (short)0;
         cachedMemberNidsVersion = (short)-1;
-        joinTimeLimit = Integer.parseInt(props.getProperty("joinTimeLimit", "10")); // wait up to 10 secs by default for coord to be available
+        joinRetries = Integer.parseInt(props.getProperty("joinTimeLimit", "10")); // wait up to 10 secs by default for coord to be available
         membershipBroadcastPeriod = Integer.parseInt(props.getProperty("membershipBroadcastPeriod", "0"));
 
         // NOTE note that you'll probably want to set this, always!
@@ -331,7 +331,7 @@ public class NeuRonNode extends Thread {
         try {
             run2();
         } catch (PlannedException ex) {
-            log(ex.getMessage());
+            warn(ex.getMessage());
             failure.set(ex);
             if (semAllJoined != null) semAllJoined.release();
         } catch (Exception ex) {
@@ -463,18 +463,16 @@ public class NeuRonNode extends Thread {
                 throw new RuntimeException(ex);
             }
         } else {
-            Socket s = null;
-            long startTime = System.currentTimeMillis();
             int count = 0;
             while (true) {
+                Socket s = null;
                 try {
-                    if (count++ > joinTimeLimit) {
+                    if (count++ > joinRetries) {
                         throw new PlannedException("exceeded join try limit; aborting");
                     }
                     // connect to the coordinator
                     try {
                         s = new Socket(coordinatorHost, basePort);
-                        break;
                     } catch (Exception ex) {
                         log("couldn't connect to coord, retrying in 1 sec: " + ex.getMessage());
                         try {
@@ -482,38 +480,40 @@ public class NeuRonNode extends Thread {
                         } catch (InterruptedException ie) {
                         }
                     }
-
-                    try {
-                        // talk to coordinator
-                        log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
-                        Join msg = new Join();
-                        msg.addr = myCachedAddr;
-                        msg.src = myNid; // informs coord of orig id
-                        msg.port = myPort;
-                        DataOutputStream dos = new DataOutputStream(s.getOutputStream());
-                        new Serialization().serialize(msg, dos);
-                        dos.flush();
-
-                        log("waiting for InitMsg");
-                        ByteArrayOutputStream minibaos = new ByteArrayOutputStream();
-                        byte[] minibuf = new byte[8192];
-                        int amt;
-                        while ((amt = s.getInputStream().read(minibuf)) > 0) {
-                            minibaos.write(minibuf, 0, amt);
-                        }
-                        byte[] buf = minibaos.toByteArray();
+                    if (s != null) {
                         try {
-                            Init im = (Init) new Serialization().deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
-                            handleInit(im);
-                        } catch (Exception ex) {
-                            err("got buffer: " + bytes2string(buf));
-                            throw ex;
-                        }
-                    } finally {
-                        try {
-                            s.close();
-                        } catch (Exception ex) {
-                            throw new RuntimeException(ex);
+                            // talk to coordinator
+                            log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
+                            Join msg = new Join();
+                            msg.addr = myCachedAddr;
+                            msg.src = myNid; // informs coord of orig id
+                            msg.port = myPort;
+                            DataOutputStream dos = new DataOutputStream(s.getOutputStream());
+                            new Serialization().serialize(msg, dos);
+                            dos.flush();
+    
+                            log("waiting for InitMsg");
+                            ByteArrayOutputStream minibaos = new ByteArrayOutputStream();
+                            byte[] minibuf = new byte[8192];
+                            int amt;
+                            while ((amt = s.getInputStream().read(minibuf)) > 0) {
+                                minibaos.write(minibuf, 0, amt);
+                            }
+                            byte[] buf = minibaos.toByteArray();
+                            try {
+                                Init im = (Init) new Serialization().deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
+                                handleInit(im);
+                            } catch (Exception ex) {
+                                err("got buffer: " + bytes2string(buf));
+                                throw ex;
+                            }
+                            break;
+                        } finally {
+                            try {
+                                s.close();
+                            } catch (Exception ex) {
+                                throw new RuntimeException(ex);
+                            }
                         }
                     }
                 } catch (PlannedException ex) {
@@ -546,6 +546,12 @@ public class NeuRonNode extends Thread {
                 }), 1, probePeriod, TimeUnit.SECONDS);
                 scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
                     public void run() {
+                        /*
+                         * path-finding and rendezvous finding is
+                         * interdependent. the fact that we do the path-finding
+                         * first before the rendezvous servers is arbitrary.
+                         */
+                        findPathsForAllNodes();
                         ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ?
                                 otherNodes : getAllRendezvousServers();
                         broadcastMeasurements(measRecips);
