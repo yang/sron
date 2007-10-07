@@ -1066,10 +1066,12 @@ public class NeuRonNode extends Thread {
 
         for (int r0 = 0; r0 < numRows; r0++) {
             for (int c0 = 0; c0 < numCols; c0++) {
+                NodeState n = grid[r0][c0];
                 for (int r1 = 0; r1 < numRows; r1++)
-                    grid[r0][c0].defaultClients.add(grid[r1][c0]);
+                    n.defaultClients.add(grid[r1][c0]);
                 for (int c1 = 0; c1 < numCols; c1++)
-                    grid[r0][c0].defaultClients.add(grid[r0][c1]);
+                    n.defaultClients.add(grid[r0][c1]);
+                n.defaultClients.remove(n);
             }
         }
 
@@ -1082,6 +1084,9 @@ public class NeuRonNode extends Thread {
      * @return
      */
     private boolean isFailedRendezvous(NodeState n, short remoteNid) {
+        ///XXX
+        if (myNid == 1 && n.info.id == 7 && remoteNid == 8)
+            System.out.println("old remote failures " + n.remoteFailures);
         return !n.isReachable || n.remoteFailures.contains(remoteNid);
     }
 
@@ -1417,6 +1422,9 @@ public class NeuRonNode extends Thread {
                     r.remoteFailures.add(dst);
                 }
             }
+            ///XXX
+            if (r.info.id == 7 && myNid == 1)
+                System.out.println("new remote failures " + r.remoteFailures);
         }
     }
 
