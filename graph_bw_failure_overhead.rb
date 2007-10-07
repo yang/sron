@@ -1,4 +1,7 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby
+# vim:et:sw=4:ts=4
+#
+# XXX LOG PROCESSING BROKEN, SEE GRAPH.RB
 
 BASEDIR = "."
 puts BASEDIR

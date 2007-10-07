@@ -3,6 +3,7 @@ package edu.cmu.neuron2;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.lang.annotation.*;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -462,21 +463,17 @@ public class NeuRonNode extends Thread {
                 throw new RuntimeException(ex);
             }
         } else {
-            try {
-                Socket s = null;
-                long startTime = System.currentTimeMillis();
-                int count = 0;
-                while (true) {
+            Socket s = null;
+            long startTime = System.currentTimeMillis();
+            int count = 0;
+            while (true) {
+                try {
                     if (count++ > joinTimeLimit) {
                         throw new PlannedException("exceeded join try limit; aborting");
                     }
-                    // if ((System.currentTimeMillis() - startTime) / 1000 > joinTimeLimit) {
-                    //     throw new PlannedException("exceeded join time limit; aborting");
-                    // }
-                    // Connect to the co-ordinator
+                    // connect to the coordinator
                     try {
                         s = new Socket(coordinatorHost, basePort);
-                        //if (count > 0) throw new Exception();
                         break;
                     } catch (Exception ex) {
                         log("couldn't connect to coord, retrying in 1 sec: " + ex.getMessage());
@@ -485,50 +482,54 @@ public class NeuRonNode extends Thread {
                         } catch (InterruptedException ie) {
                         }
                     }
-                }
 
-                try {
-                    // talk to coordinator
-                    log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
-                    Join msg = new Join();
-                    msg.addr = myCachedAddr;
-                    msg.src = myNid; // informs coord of orig id
-                    msg.port = myPort;
-                    DataOutputStream dos = new DataOutputStream(s.getOutputStream());
-                    new Serialization().serialize(msg, dos);
-                    dos.flush();
-
-                    log("waiting for InitMsg");
-                    ByteArrayOutputStream minibaos = new ByteArrayOutputStream();
-                    byte[] minibuf = new byte[8192];
-                    int amt;
-                    while ((amt = s.getInputStream().read(minibuf)) > 0) {
-                        minibaos.write(minibuf, 0, amt);
-                    }
-                    byte[] buf = minibaos.toByteArray();
                     try {
-                        Init im = (Init) new Serialization().deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
-                        handleInit(im);
-                    } catch (Exception ex) {
-                        err("got buffer: " + bytes2string(buf));
-                        throw ex;
-                    }
-                } finally {
-                    try {
-                        s.close();
-                    } catch (Exception ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }
+                        // talk to coordinator
+                        log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
+                        Join msg = new Join();
+                        msg.addr = myCachedAddr;
+                        msg.src = myNid; // informs coord of orig id
+                        msg.port = myPort;
+                        DataOutputStream dos = new DataOutputStream(s.getOutputStream());
+                        new Serialization().serialize(msg, dos);
+                        dos.flush();
 
-                // wait for coordinator to announce my existence to others
+                        log("waiting for InitMsg");
+                        ByteArrayOutputStream minibaos = new ByteArrayOutputStream();
+                        byte[] minibuf = new byte[8192];
+                        int amt;
+                        while ((amt = s.getInputStream().read(minibuf)) > 0) {
+                            minibaos.write(minibuf, 0, amt);
+                        }
+                        byte[] buf = minibaos.toByteArray();
+                        try {
+                            Init im = (Init) new Serialization().deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
+                            handleInit(im);
+                        } catch (Exception ex) {
+                            err("got buffer: " + bytes2string(buf));
+                            throw ex;
+                        }
+                    } finally {
+                        try {
+                            s.close();
+                        } catch (Exception ex) {
+                            throw new RuntimeException(ex);
+                        }
+                    }
+                } catch (PlannedException ex) {
+                    throw ex;
+                } catch (SocketException ex) {
+                    warn(ex.getMessage());
+                    return;
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }
+
+            // wait for coordinator to announce my existence to others
+            try {
                 Thread.sleep(membershipBroadcastPeriod * 1000);
-            } catch (PlannedException ex) {
-                throw ex;
-            } catch (SocketException ex) {
-                log(ex.getMessage());
-                return;
-            } catch (Exception ex) {
+            } catch (InterruptedException ex) {
                 throw new RuntimeException(ex);
             }
 
@@ -702,7 +703,19 @@ public class NeuRonNode extends Thread {
                         } else if (msg instanceof Pong) {
                             Pong pong = (Pong) msg;
                             short rtt = (short) (System.currentTimeMillis() - pong.time);
-                            log("latency", "one way latency to " + pong.src + " = " + rtt/2);
+                            
+                            if (state != null) {
+                                resetTimeoutAtNode(pong.src);
+                                NodeState self = nodes.get(myNid);
+                                short oldLatency = self.latencies.get(pong.src);
+                                short ewma = (short) (smoothingFactor
+                                        * (rtt / 2) + (1 - smoothingFactor)
+                                        * oldLatency);
+                                log("latency", pong.src + " = " + rtt/2 + ", ewma " + ewma);
+                                self.latencies.put(pong.src, ewma);
+                            } else {
+                                log("latency", "some " + pong.src + " = " + rtt/2);
+                            }
                         }
 
                         // for other messages, make sure their state version is
@@ -741,15 +754,7 @@ public class NeuRonNode extends Thread {
                             } else if (msg instanceof Ping) {
                                 // nothing to do, already handled above
                             } else if (msg instanceof Pong) {
-                                Pong pong = (Pong) msg;
-                                resetTimeoutAtNode(pong.src);
-                                NodeState myState = nodes.get(myNid);
-								short rtt = (short) (System.currentTimeMillis() - pong.time);
-								short oldLatency = myState.latencies.get(pong.src);
-								short ewma = (short) (smoothingFactor
-                                        * (rtt / 2) + (1 - smoothingFactor)
-                                        * oldLatency);
-								myState.latencies.put(pong.src, ewma);
+                                // nothing to do, already handled above
                             } else if (msg instanceof PeeringRequest) {
                                 resetTimeoutOnRendezvousClient(msg.src);
                                 rendezvousClients.add(nodes.get(msg.src));
@@ -846,11 +851,13 @@ public class NeuRonNode extends Thread {
                                 } else {
                                     node.hop = 0;
                                     // see if a rendezvous client can serve as the hop.
-                                    // TODO choose the lowest-latency option.
+                                    // TODO choose the lowest-latency route.
+                                    short min = resetLatency;
                                     for (NodeState client : clients) {
-                                        if (client.latencies.containsKey(nid)) {
+                                        short val = client.latencies.get(nid);
+                                        if (val < min) {
                                             node.hop = client.info.id;
-                                            break;
+                                            min = val;
                                         }
                                     }
                                     if (node.hop == 0) {
@@ -1023,7 +1030,23 @@ public class NeuRonNode extends Thread {
         for (int rz = 0; rz < numRows; rz++) {
             for (int cz = 0; cz < numCols; cz++) {
                 if (grid[rz][cz] == self) {
-                    // add the pairs
+                    HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
+                    HashSet<NodeState> rendezvousClientCol = new HashSet<NodeState>();
+                    // add this column and row as clients
+                    for (int r1 = 0; r1 < numRows; r1++) {
+                        NodeState cli = grid[r1][cz];
+                        if (cli.isReachable && cli != self)
+                            rendezvousClientCol.add(cli);
+                    }
+                    for (int c1 = 0; c1 < numCols; c1++) {
+                        NodeState cli = grid[rz][c1];
+                        if (cli.isReachable && cli != self)
+                            rendezvousClientRow.add(cli);
+                    }
+                    rendezvousClients.addAll(rendezvousClientRow);
+                    rendezvousClients.addAll(rendezvousClientCol);
+                    
+                    // add the rendezvous servers to all nodes
                     for (int r0 = 0; r0 < numRows; r0++) {
                         for (int c0 = 0; c0 < numCols; c0++) {
                             NodeState dst = grid[r0][c0];
@@ -1032,33 +1055,32 @@ public class NeuRonNode extends Thread {
                                 rs = new HashSet<NodeState>();
                                 defaultRendezvousServers.put(dst.info.id, rs);
                             }
-                            if (self != grid[rz][c0])
-                                rs.add(grid[rz][c0]);
-                            if (self != grid[r0][cz])
-                                rs.add(grid[r0][cz]);
+                            if (r0 != rz && c0 != cz) {
+                                // normally, add the pairs
+                                if (self != grid[rz][c0])
+                                    rs.add(grid[rz][c0]);
+                                if (self != grid[r0][cz])
+                                    rs.add(grid[r0][cz]);
+                            } else if (c0 == cz) {
+                                /*
+                                 * if this is in our col (a neighbor), everyone
+                                 * else in that col is in essence a rendezvous
+                                 * server between us two
+                                 */
+                                rs.addAll(rendezvousClientCol);
+                            } else if (r0 == rz) {
+                                /*
+                                 * ditto for rows
+                                 */
+                                rs.addAll(rendezvousClientRow);
+                            }
                         }
-                    }
-
-                    // add this column and row as clients
-                    for (int r1 = 0; r1 < numRows; r1++) {
-                        NodeState cli = grid[r1][cz];
-                        if (cli.isReachable && cli != self)
-                            rendezvousClients.add(cli);
-                    }
-                    for (int c1 = 0; c1 < numCols; c1++) {
-                        NodeState cli = grid[rz][c1];
-                        if (cli.isReachable && cli != self)
-                            rendezvousClients.add(cli);
                     }
                 }
             }
         }
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
-//            HashSet<NodeState> values = new HashSet<NodeState>();
-//            for (NodeState n : entry.getValue())
-//                if (n.isReachable)
-//                    values.add(n);
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
         }
 
@@ -1066,7 +1088,6 @@ public class NeuRonNode extends Thread {
     }
 
     /**
-     * TODO
      * @param n
      * @param remoteNid
      * @return
@@ -1079,25 +1100,6 @@ public class NeuRonNode extends Thread {
      * @return failoverClients `union` nodes in my row and col (wherever i occur)
      */
     private ArrayList<NodeState> getAllRendezvousClients() {
-//        HashSet<NodeState> clients = new HashSet<NodeState>();
-//        NodeState self = nodes.get(myNid);
-//        for (int r0 = 0; r0 < numRows; r0++) {
-//            for (int c0 = 0; c0 < numCols; c0++) {
-//                if (grid[r0][c0] == self) {
-//                    for (int r1 = 0; r1 < numRows; r1++) {
-//                        NodeState c = grid[r1][c0];
-//                        if (c.isReachable && c != self)
-//                            clients.add(c);
-//                    }
-//                    for (int c1 = 0; c1 < numRows; c1++) {
-//                        NodeState c = grid[r0][c1];
-//                        if (c.isReachable && c != self)
-//                            clients.add(c);
-//                    }
-//                }
-//            }
-//        }
-//        clients.addAll(rendezvousClients);
         ArrayList<NodeState> list = new ArrayList<NodeState>(rendezvousClients);
         Collections.sort(list);
         return list;
@@ -1230,6 +1232,7 @@ public class NeuRonNode extends Thread {
      */
     private void broadcastRecommendations() {
         ArrayList<NodeState> clients = getAllRendezvousClients();
+        @SuppressWarnings("unchecked")
         ArrayList<NodeState> dsts = (ArrayList<NodeState>) clients.clone();
         dsts.add(nodes.get(myNid));
         Collections.sort(dsts);
@@ -1261,7 +1264,7 @@ public class NeuRonNode extends Thread {
             ArrayList<Short> hops, NodeState src, ArrayList<Rec> recs) {
         for (NodeState dst : dsts) {
             if (src != dst) {
-                short min = Short.MAX_VALUE;
+                short min = resetLatency;
                 short minhop = -1;
                 for (short hop : hops) {
                     if (hop != src.info.id) {
@@ -1274,6 +1277,7 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }
+                assert minhop != -1;
                 Rec rec = new Rec();
                 rec.dst = dst.info.id;
                 rec.via = minhop;
@@ -1286,7 +1290,7 @@ public class NeuRonNode extends Thread {
             ArrayList<NodeState> hops, NodeState src, ArrayList<Rec> recs) {
         for (short dst : dsts) {
             if (src.info.id != dst && nodes.get(dst).isReachable) {
-                short min = Short.MAX_VALUE;
+                short min = resetLatency;
                 short minhop = -1;
                 for (NodeState hop : hops) {
                     if (hop != src) {
@@ -1299,6 +1303,7 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }
+                assert minhop != -1;
                 Rec rec = new Rec();
                 rec.dst = dst;
                 rec.via = minhop;
@@ -1383,7 +1388,7 @@ public class NeuRonNode extends Thread {
         ArrayList<Rec> recs = msg.recs;
         HashSet<Short> dstsPresent = new HashSet<Short>();
         for (Rec r : recs) {
-            if (isDirectlyReachable(r.via)) {
+            if (nodes.get(r.via).isReachable) {
                 if (scheme == RoutingScheme.SQRT_SPECIAL) {
                     /*
                      * TODO: add in support for processing sqrt_special
@@ -1439,10 +1444,6 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private boolean isDirectlyReachable(short nid) {
-        return nodes.get(myNid).latencies.get(nid) != resetLatency;
-    }
-
     /**
      * TODO counts the number of nodes for which we have rendezvous
      * @return
@@ -1487,7 +1488,7 @@ public class NeuRonNode extends Thread {
         	if (node.hop != 0)
         		availableHops.add(node.hop);
 
-        	if ((node.hop != myNid) && isDirectlyReachable(node.info.id)){
+        	if ((node.hop != myNid) && node.isReachable){
         		availableHops.add(myNid);
         	}
 
@@ -1618,7 +1619,10 @@ class ShortShortMap {
         return value != null ? value : defaultValue;
     }
     public void put(short key, short value) {
-        table.put(key, value);
+        if (value == defaultValue)
+            table.remove(key);
+        else
+            table.put(key, value);
     }
 }
 
