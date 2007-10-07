@@ -151,7 +151,7 @@ public class NeuRonNode extends Thread {
 
     private final ArrayList<NodeState> otherNodes = new ArrayList<NodeState>();
 
-    private final ArrayList<NodeState> lastNeighbors = new ArrayList<NodeState>();
+    private final ArrayList<NodeState> lastRendezvousServers = new ArrayList<NodeState>();
 
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
@@ -744,13 +744,7 @@ public class NeuRonNode extends Thread {
                             } else if (msg instanceof RoutingRecs) {
                                 RoutingRecs recs = (RoutingRecs) msg;
                                 handleRecommendations(recs);
-                                log("got recs " + routesToString(recs.recs)
-                                        + ", " + countReachableNodes()
-                                        + " total reachable nodes");
-
-                                Pair<Integer, Integer> p = countAvaibleOneHopPaths();
-                                log("total reachable nodes = " + p.first());
-                                log("average available one-hop paths = " + p.second());
+                                log("got recs " + routesToString(recs.recs));
                             } else if (msg instanceof Ping) {
                                 // nothing to do, already handled above
                             } else if (msg instanceof Pong) {
@@ -838,34 +832,9 @@ public class NeuRonNode extends Thread {
                         log(nid + " unreachable");
                         node.isReachable = false;
                         nodes.get(myNid).latencies.remove(nid);
-
                         rendezvousClients.remove(node);
-                        ArrayList<NodeState> clients = getAllRendezvousClients();
 
-                        // if nid was someone's hop, fix that. note that this
-                        // includes the node itself, which we want.
-                        for (NodeState node : nodes.values()) {
-                            if (node.hop == nid) {
-                                if (node.isReachable) {
-                                    node.hop = node.info.id;
-                                } else {
-                                    node.hop = 0;
-                                    // see if a rendezvous client can serve as the hop.
-                                    // TODO choose the lowest-latency route.
-                                    short min = resetLatency;
-                                    for (NodeState client : clients) {
-                                        short val = client.latencies.get(nid);
-                                        if (val < min) {
-                                            node.hop = client.info.id;
-                                            min = val;
-                                        }
-                                    }
-                                    if (node.hop == 0) {
-                                        log("node " + node + " down");
-                                    }
-                                }
-                            }
-                        }
+                        // XXX remove: findPaths(node);
                     }
                 }
             }), linkTimeout, TimeUnit.SECONDS);
@@ -1082,6 +1051,16 @@ public class NeuRonNode extends Thread {
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
+        }
+        lastRendezvousServers.clear();
+
+        for (int r0 = 0; r0 < numRows; r0++) {
+            for (int c0 = 0; c0 < numCols; c0++) {
+                for (int r1 = 0; r1 < numRows; r1++)
+                    grid[r0][c0].defaultClients.add(grid[r1][c0]);
+                for (int c1 = 0; c1 < numCols; c1++)
+                    grid[r0][c0].defaultClients.add(grid[r0][c1]);
+            }
         }
 
         log("state " + currentStateVersion + ", mbrs " + nids);
@@ -1386,9 +1365,11 @@ public class NeuRonNode extends Thread {
 
     private void handleRecommendations(RoutingRecs msg) {
         ArrayList<Rec> recs = msg.recs;
-        HashSet<Short> dstsPresent = new HashSet<Short>();
-        for (Rec r : recs) {
-            if (nodes.get(r.via).isReachable) {
+        NodeState r = nodes.get(msg.src);
+        r.dstsPresent.clear();
+        r.remoteFailures.clear();
+        for (Rec rec : recs) {
+            if (nodes.get(rec.via).isReachable) {
                 if (scheme == RoutingScheme.SQRT_SPECIAL) {
                     /*
                      * TODO: add in support for processing sqrt_special
@@ -1401,12 +1382,12 @@ public class NeuRonNode extends Thread {
                      * must be some threshold in time past which we disregard old
                      * latencies. must keep some history
                      */
-                    nodes.get(r.dst).hopOptions.add(r.via);
-                    nodes.get(r.dst).hop = r.via;
+                    nodes.get(rec.dst).hopOptions.add(rec.via);
+                    nodes.get(rec.dst).hop = rec.via;
                 } else {
                     // blindly trust the recommendations
-                    nodes.get(r.dst).hop = r.via;
-                    dstsPresent.add(r.dst);
+                    nodes.get(rec.dst).hop = rec.via;
+                    r.dstsPresent.add(rec.dst);
                 }
             }
         }
@@ -1414,24 +1395,10 @@ public class NeuRonNode extends Thread {
         if (scheme != RoutingScheme.SQRT_SPECIAL) {
             /*
              * get the full set of dsts that we depend on this node for. note
-             * that it may be serving a different set of nodes.
+             * that the set of nodes it's actually serving may be different.
              */
-            HashSet<NodeState> dsts = new HashSet<NodeState>();
-            for (int r0 = 0; r0 < numRows; r0++) {
-                for (int c0 = 0; c0 < numCols; c0++) {
-                    if (msg.src == grid[r0][c0].info.id) {
-                        for (int r1 = 0; r1 < numRows; r1++)
-                            dsts.add(grid[r1][c0]);
-                        for (int c1 = 0; c1 < numCols; c1++)
-                            dsts.add(grid[r0][c1]);
-                    }
-                }
-            }
-
-            NodeState r = nodes.get(msg.src);
-            r.remoteFailures.clear();
-            for (NodeState dst : dsts) {
-                if (!dstsPresent.contains(dst.info.id)) {
+            for (NodeState dst : r.defaultClients) {
+                if (!r.dstsPresent.contains(dst.info.id)) {
                     /*
                      * there was a comm failure between this rendezvous and the
                      * dst for which this rendezvous did not provide a
@@ -1442,14 +1409,6 @@ public class NeuRonNode extends Thread {
                 }
             }
         }
-    }
-
-    /**
-     * TODO counts the number of nodes for which we have rendezvous
-     * @return
-     */
-    private int countOptimalNodes() {
-        return -1;
     }
 
     /**
@@ -1474,50 +1433,62 @@ public class NeuRonNode extends Thread {
     }
 
     /**
+     * counts the number of paths to a particular node
+     */
+    private int findPaths(NodeState node) {
+        ArrayList<NodeState> clients = getAllRendezvousClients();
+        ArrayList<NodeState> servers = lastRendezvousServers;
+        HashSet<NodeState> options = new HashSet<NodeState>();
+        short nid = node.info.id;
+
+        node.hop = 0;
+
+        // find best rendezvous client. note that this includes node itself.
+        short min = resetLatency;
+        for (NodeState client : clients) {
+            short val = client.latencies.get(nid);
+            if (val != resetLatency) {
+                options.add(client);
+                if (val < min) {
+                    node.hop = client.info.id;
+                    min = val;
+                }
+            }
+        }
+
+        // see if a rendezvous server can serve as the hop. (can't just iterate
+        // through hopOptions, because that doesn't tell us which server to go
+        // through.)
+        for (NodeState server : servers) {
+            if (server.dstsPresent.contains(min)) {
+                options.add(server);
+                if (node.hop == 0)
+                    node.hop = server.info.id;
+            }
+        }
+
+        if (node.hop == 0)
+            log("node " + node + " down");
+
+        return options.size();
+    }
+
+    /**
      * counts the avg number of one-hop or direct paths available to nodes
      * @return
      */
-    private Pair<Integer, Integer> countAvaibleOneHopPaths() {
-
+    private Pair<Integer, Integer> findPathsForAllNodes() {
         NodeState myState = nodes.get(myNid);
         int count = 0;
         int numNodesReachable = 0;
         for (NodeState node : otherNodes) {
-        	HashSet<Short> availableHops = new HashSet<Short>();
-
-        	if (node.hop != 0)
-        		availableHops.add(node.hop);
-
-        	if ((node.hop != myNid) && node.isReachable){
-        		availableHops.add(myNid);
-        	}
-
-        	// for the available hop options that are valid (i.e. no proximal or remote failures)
-        	for (Short hop : node.hopOptions) {
-        		NodeState hopNodeState = nodes.get(hop);
-        		if ((hopNodeState != null) && !isFailedRendezvous(hopNodeState, node.info.id)) {
-            		availableHops.add(hop);
-        		} else {
-        			// TODO :: maybe we can fix node.hopOptions here!
-        		}
-        	}
-
-            ArrayList<NodeState> clients = getAllRendezvousClients();
-            for (NodeState client : clients) {
-                if (client.latencies.containsKey(node.info.id)) {
-            		availableHops.add(client.info.id);
-                }
-            }
-
-            count += availableHops.size();
-            if (!availableHops.isEmpty())
-            	numNodesReachable++;
+            int d = findPaths(node);
+            count += d;
+            numNodesReachable += d > 0 ? 1 : 0;
         }
-
-        if (numNodesReachable != 0) {
-        	count /= numNodesReachable;
-        }
-        return new Pair<Integer, Integer>(numNodesReachable, count);
+        if (numNodesReachable > 0)
+            count /= numNodesReachable;
+        return Pair.of(numNodesReachable, count);
     }
 
     public void quit() {
@@ -1581,6 +1552,16 @@ public class NeuRonNode extends Thread {
          *  - empty
          */
         public final HashSet<NodeState> remoteFailures = new HashSet<NodeState>();
+
+        /**
+         * dstsPresent, the complement of remoteFailures (in defaultClients).
+         */
+        public final HashSet<Short> dstsPresent = new HashSet<Short>();
+
+        /**
+         * basically, his row/col. (all the nodes that he's responsible for).
+         */
+        public final HashSet<NodeState> defaultClients = new HashSet<NodeState>();
 
         /**
          * this is unused at the moment. still need to re-design.

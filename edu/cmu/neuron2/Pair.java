@@ -32,6 +32,11 @@ public class Pair<A,B>
 		return first.hashCode()+second.hashCode();
 	}
 
+	public static <A,B> Pair<A,B> of(A a, B b)
+	{
+		return new Pair<A,B>(a,b);
+	}
+
 	public String toString()
 	{
 		String s = "";
