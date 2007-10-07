@@ -934,8 +934,10 @@ public class NeuRonNode extends Thread {
         // add new nodes
 
         for (NodeInfo node : newNodes)
-            if (!nodes.containsKey(node.id))
+            if (!nodes.containsKey(node.id)) {
                 nodes.put(node.id, new NodeState(node));
+                resetTimeoutAtNode(node.id);
+            }
 
         // remove nodes
 
@@ -948,7 +950,7 @@ public class NeuRonNode extends Thread {
                 toRemove.add(nid);
         for (Short nid : toRemove)
             nodes.remove(nid);
-
+        
         // consistency cleanups: check that all nid references are still valid nid's
 
         for (NodeState state : nodes.values()) {
@@ -1447,7 +1449,7 @@ public class NeuRonNode extends Thread {
         HashSet<NodeState> options = new HashSet<NodeState>();
         short nid = node.info.id;
 
-        node.hop = 0;
+        node.hop = node.isReachable ? node.info.id : 0;
 
         // find best rendezvous client. note that this includes node itself.
         short min = resetLatency;
@@ -1577,6 +1579,7 @@ public class NeuRonNode extends Thread {
 
         public NodeState(NodeInfo info) {
             this.info = info;
+            latencies.put(info.id, (short) 0);
         }
 
         public int compareTo(NodeState o) {
