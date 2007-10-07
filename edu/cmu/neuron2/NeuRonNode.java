@@ -551,7 +551,8 @@ public class NeuRonNode extends Thread {
                          * interdependent. the fact that we do the path-finding
                          * first before the rendezvous servers is arbitrary.
                          */
-                        findPathsForAllNodes();
+                        Pair<Integer, Integer> p = findPathsForAllNodes();
+                        log(p.first + " live nodes, " + p.second + " avg paths");
                         ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ?
                                 otherNodes : getAllRendezvousServers();
                         broadcastMeasurements(measRecips);
@@ -1368,8 +1369,7 @@ public class NeuRonNode extends Thread {
     private void updateMeasurements(Measurements m) {
         NodeState myState = nodes.get(m.src);
         for (int i = 0; i < m.probeTable.length; i++)
-            if (m.probeTable[i] != resetLatency)
-                myState.latencies.put(memberNids.get(i), m.probeTable[i]);
+            myState.latencies.put(memberNids.get(i), m.probeTable[i]);
     }
 
     private void handleRecommendations(RoutingRecs msg) {
