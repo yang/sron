@@ -4,7 +4,7 @@ TOP_DIR = .
 SRC_DIR = .
 CLASS_DIR = $(TOP_DIR)/classes
 #JAVAC_FLAGS = -g -deprecation
-JAVAC_FLAGS = -O
+JAVAC_FLAGS = -O -Xlint:unchecked
 JAVAC = javac
 JAVA = java
 

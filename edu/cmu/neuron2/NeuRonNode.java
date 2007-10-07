@@ -1540,7 +1540,6 @@ public class NeuRonNode extends Thread {
             this.info = info;
         }
 
-        @Override
         public int compareTo(NodeState o) {
             return new Short(info.id).compareTo(o.info.id);
         }
