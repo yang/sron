@@ -8,21 +8,26 @@ TEMPDIR = "/tmp"
 system("mkdir -p #{DATA_DUMP_DIR}");
 system("rm #{TEMPDIR}/scaleron-log-*")
 
-for run in 1..10
-    for failureRate in [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80]
-        for numNodes in [5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-                puts "************************************************************"
-                puts "-----> failureRate = #{failureRate}%, numNodes = #{numNodes}, run# = #{run}"
+# 2*5*2*5 = 100 runs (200 mins)
+for run in 1..2
+    for failureRate in [5, 10, 15, 20, 25]
+        for numNodes in [10, 50]
+            puts "************************************************************"
+            puts "generating failure data ..."
+            puts "-----> failureRate = #{failureRate}%, numNodes = #{numNodes}, run# = #{run}"
 
-                system("./gen_failure_data.rb #{failureRate} #{numNodes} #{run}")
+            # generate failure data
+            system("./gen_failure_data.rb #{failureRate} #{numNodes} #{run}")
 
             for runtype in ["simple", "sqrt", "sqrt_special", "sqrt_nofailover", "sqrt_rc_failover"]
+                puts "running experiment ..."
                 puts "-----> runtype = #{runtype}, numNode = #{numNodes}, failureRate = #{failureRate}%, run# = #{run}"
                 sub_dir = "#{runtype}/n_#{numNodes}/f_#{failureRate}/#{run}"
                 system("mkdir -p #{DATA_DUMP_DIR}/#{sub_dir}");
                 system("rm -f #{DATA_DUMP_DIR}/#{sub_dir}/*");
 
-                system("./run.bash delay -DfileLogFilter='send.Ping recv.Ping send.Pong recv.Pong' -DconsoleLogFilter=all -DnumNodes=#{numNodes} -Dscheme=#{runtype} -DsimData=./fd/f_#{failureRate}/n_#{numNodes}/r_#{run}/failure_data.dat")
+                # run for all configs with the same failure data set.
+                system("./run.bash -DtotalTime=120 -DfileLogFilter='send.Ping recv.Ping send.Pong recv.Pong' -DconsoleLogFilter=all -DnumNodes=#{numNodes} -Dscheme=#{runtype} -DprobePeriod=10 -DneighborBroadcastPeriod=30 -DsimData=./fd/f_#{failureRate}/n_#{numNodes}/r_#{run}/failure_data.dat -DlogFileBase=scaleron-log-")
 
                 system("sleep 2")
                 puts ">>>>>"

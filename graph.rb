@@ -43,27 +43,27 @@ for scheme in schemes
 end
 
 for gtype in ["monochrome", "color"]
-  plots = []
-  for scheme in schemes
-      plots << "'#{datadir}/#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
-  end
-  plots = plots.join(', ')
+    plots = []
+    for scheme in schemes
+        plots << "'#{datadir}/#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+    end
+    plots = plots.join(', ')
 
-  # XXX set terminal postscript eps #{gtype}
-  # set output '#{graphdir}/bandwidth_#{gtype}.eps'
-  File.open("bandwidth.gnuplot", "w") do |out|
-      out.puts %Q{
-set terminal png
+    # XXX set terminal postscript eps #{gtype}
+    # set output '#{graphdir}/bandwidth_#{gtype}.eps'
+    File.open("bandwidth.gnuplot", "w") do |out|
+        out.puts %Q{
+set terminal postscript eps #{gtype}
 set size 0.65
-set output '#{graphdir}/bandwidth_#{gtype}.png'
+set output '#{graphdir}/bandwidth_#{gtype}.eps'
 set title "Comparison of routing bandwidth overhead"
 set xlabel "number of nodes"
 set ylabel "routing bandwidth overhead (Kbps)"
 set key left top
 plot #{plots}
 }
-  end
+    end
+    system("cat bandwidth.gnuplot | gnuplot -")
+    system("rm bandwidth.gnuplot")
 end
 
-system("cat bandwidth.gnuplot | gnuplot -")
-system("rm bandwidth.gnuplot")

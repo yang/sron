@@ -161,7 +161,7 @@ public class NeuRonNode extends Thread {
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
-        probePeriod = Integer.parseInt(props.getProperty("probePeriod", "15"));
+        probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
         timeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         failoverTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + timeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
