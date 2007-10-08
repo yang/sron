@@ -22,18 +22,25 @@ end
 puts "************************************************************"
 for numNodes in [10, 50, 100]
     for runtype in schemes
-        out = File.new("#{DATA_DIR}/#{numNodes}_#{runtype}.dat", "w")
+        out = File.new("#{DATA_DIR}/reachable_#{numNodes}_#{runtype}.dat", "w")
+
         for failureRate in [5, 10, 25, 50, 75]
 
-            xs = []
             for run in 1..numRuns
                 puts "-----> runtype = #{runtype}, numNode = #{numNodes}, failureRate = #{failureRate}%, run# = #{run}"
-                sub_dir = "#{runtype}/n#{numNodes}/f#{failureRate}/r#{run}"
+                sub_dir = "#{DATA_DIR}/#{runtype}/n#{numNodes}/f#{failureRate}/r#{run}"
                 puts "#{sub_dir}"
 
-                for path in Dir["#{DATA_DIR}/#{sub_dir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
+                # one file per subdir (one line per node) -> "min, max, mean"
+                reachable_dat = File.new("#{sub_dir}/reachable.dat", "w")
+                available_dat = File.new("#{sub_dir}/available_hops.dat", "w")
+
+                for path in Dir["#{sub_dir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
                     File.open(path) do |f|
                         begin
+                            num_avg = 0
+                            # one tmp file per node for stats -> "#{live_nodes} #{num_paths} #{numNodes}"
+                            tmp_file = File.new("#{TMP_DIR}/stats_n#{numNodes}_tmp.dat", "w")
                             start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
                             f.seek(0)
                             live_nodes, avg_paths, count, end_time = 0, 0, 0, 0
@@ -41,21 +48,56 @@ for numNodes in [10, 50, 100]
                                 fields = line.split(': ')
                                 end_time = Integer(fields[0].split(' ')[0])
                                 fields = fields[1].split(', ')
-                                live_nodes += fields[0].split(' ')[0].to_i
-                                avg_paths += fields[1].split(' ')[0].to_i
+                                live_nodes = fields[0].split(' ')[0].to_i
+                                num_paths = fields[1].split(' ')[0].to_i
+                                #direct_paths = fields[2].split(' ')[0].to_i
+
                                 count += 1
+                                tmp_file.puts "#{live_nodes} #{num_paths} #{numNodes}"
                             end
-                            xs << live_nodes
+                            tmp_file.close
+                            stats = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $1}' | ~/tools/UnixStat/bin/stats min max mean`
+                            stats2 = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $2}' | ~/tools/UnixStat/bin/stats min max mean`
+                            #stats3 = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats min max mean`
+
+                            puts "reachable => #{stats}"
+                            puts "available hops => #{stats2}"
+
+                            reachable_dat.puts "#{stats}"
+                            available_dat.puts "#{stats2}"
                         rescue
                         end
                     end
                 end
 
+                reachable_dat.close
+                available_dat.close
+
             end #runs
 
-            #puts xs.inject{|x,y| x+y}
-            averageSize = xs.inject{|x,y| x+y} / xs.size.to_f
-            out.puts "#{failureRate} #{averageSize}"
+
+            # find (min, max, average) across runs, of the averages in each run
+            f_dir = "#{DATA_DIR}/#{runtype}/n#{numNodes}/f#{failureRate}"
+            # "min, max, mean" of averages, across runs
+            # has one line per run
+            avg_reachable_dat = File.new("#{f_dir}/avg_reachable.dat", "w")
+            avg_available_hops_dat = File.new("#{f_dir}/avg_available_hops.dat", "w")
+            for run in 1..numRuns
+                # we are interested in the mean value in each of these files
+                stats = `cat #{f_dir}/r#{run}/reachable.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats min max mean`
+                avg_reachable_dat.puts "#{stats}"
+                stats2 = `cat #{f_dir}/r#{run}/available_hops.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats min max mean`
+                avg_available_hops_dat.puts "#{stats2}"
+            end
+            avg_reachable_dat.close
+            avg_available_hops_dat.close
+
+            # 
+            avg_reachability_across_runs = `cat #{f_dir}/avg_reachable.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats mean`
+            avg_available_hops_across_runs = `cat #{f_dir}/avg_available_hops.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats mean`
+
+            out.puts "#{failureRate} #{avg_reachability_across_runs.chomp} #{avg_available_hops_across_runs.chomp}"
+            
         end
         out.close
     end
@@ -65,7 +107,7 @@ for numNodes in [10, 50, 100]
     for gtype in ["monochrome", "color"]
         plots = []
         for scheme in schemes
-            plots << "'#{DATA_DIR}/#{numNodes}_#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+            plots << "'#{DATA_DIR}/reachable_#{numNodes}_#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
         end
         plots = plots.join(', ')
 
@@ -78,7 +120,8 @@ set output '#{GRAPH_DIR}/reachability_vs_failures_#{numNodes}nodes_#{gtype}.eps'
 set title "Reachability"
 set xlabel "failure percentage"
 set ylabel "average # of reachable nodes per node"
-set key left top
+set yrange [0:]
+set key left bottom
 plot #{plots}
 }
         end
@@ -88,4 +131,4 @@ plot #{plots}
 end
 
 system("rm #{DATA_DIR}/*.dat")
-
+system("rm #{TMP_DIR}/*.dat")

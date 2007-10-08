@@ -22,16 +22,20 @@ end
 puts "************************************************************"
 for numNodes in [10, 50, 100]
     for runtype in schemes
-        out = File.new("#{DATA_DIR}/#{numNodes}_#{runtype}.dat", "w")
+        out = File.new("#{DATA_DIR}/bw_#{numNodes}_#{runtype}.dat", "w")
+
         for failureRate in [5, 10, 25, 50, 75]
 
             xs = []
             for run in 1..numRuns
                 puts "-----> runtype = #{runtype}, numNode = #{numNodes}, failureRate = #{failureRate}%, run# = #{run}"
-                sub_dir = "#{runtype}/n#{numNodes}/f#{failureRate}/r#{run}"
+                sub_dir = "#{DATA_DIR}/#{runtype}/n#{numNodes}/f#{failureRate}/r#{run}"
                 puts "#{sub_dir}"
 
-                for path in Dir["#{DATA_DIR}/#{sub_dir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
+                # one file per subdir (one line per node) -> "bw in Kbps"
+                bw_dat = File.new("#{sub_dir}/bw.dat", "w")
+
+                for path in Dir["#{sub_dir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
                     File.open(path) do |f|
                         begin
                             start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
@@ -43,17 +47,30 @@ for numNodes in [10, 50, 100]
                                 fields = line.split(', ')
                                 bytes += fields[1].split(' ')[0].to_i
                             end
-                            xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
+                            node_bw = (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
+                            #puts node_bw
+                            bw_dat.puts "#{node_bw}"
                         rescue
                         end
                     end
                 end
-
+                bw_dat.close
             end #runs
 
-            #puts xs.inject{|x,y| x+y}
-            averageSize = xs.inject{|x,y| x+y} / xs.size.to_f
-            out.puts "#{failureRate} #{averageSize}"
+            # find (min, max, average) across runs, of the averages in each run
+            f_dir = "#{DATA_DIR}/#{runtype}/n#{numNodes}/f#{failureRate}"
+            # "min, max, mean" of averages, across runs
+            # has one line per run
+            avg_bw_dat = File.new("#{f_dir}/avg_bw.dat", "w")
+            for run in 1..numRuns
+                stats = `cat #{f_dir}/r#{run}/bw.dat | ~/tools/UnixStat/bin/stats min max mean`
+                avg_bw_dat.puts "#{stats}"
+            end
+            avg_bw_dat.close
+
+            avg_bw_across_runs = `cat #{f_dir}/avg_bw.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats mean`
+            out.puts "#{failureRate} #{avg_bw_across_runs.chomp}"
+
         end
         out.close
     end
@@ -63,7 +80,7 @@ for numNodes in [10, 50, 100]
     for gtype in ["monochrome", "color"]
         plots = []
         for scheme in schemes
-            plots << "'#{DATA_DIR}/#{numNodes}_#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+            plots << "'#{DATA_DIR}/bw_#{numNodes}_#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
         end
         plots = plots.join(', ')
 
@@ -76,7 +93,8 @@ set output '#{GRAPH_DIR}/bandwidth_vs_failures_#{numNodes}nodes_#{gtype}.eps'
 set title "Comparison of routing bandwidth overhead"
 set xlabel "failure percentage"
 set ylabel "routing bandwidth overhead (Kbps)"
-set key left top
+set yrange [0:]
+set key left bottom
 plot #{plots}
 }
         end
@@ -86,4 +104,4 @@ plot #{plots}
 end
 
 system("rm #{DATA_DIR}/*.dat")
-
+system("rm #{TMP_DIR}/*.dat")
