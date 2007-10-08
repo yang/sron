@@ -152,6 +152,9 @@ public class NeuRonNode extends Thread {
     private final ArrayList<NodeState> otherNodes = new ArrayList<NodeState>();
 
     private final ArrayList<NodeState> lastRendezvousServers = new ArrayList<NodeState>();
+    
+    // TODO discard
+    private final HashSet<NodeState> allDefaultServers = new HashSet<NodeState>();
 
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
@@ -264,7 +267,7 @@ public class NeuRonNode extends Thread {
 
         myPort = basePort + myNid;
 
-        clientTimeout = Integer.parseInt(props.getProperty("clientTimeout", "" + 2 * neighborBroadcastPeriod));
+        clientTimeout = Integer.parseInt(props.getProperty("clientTimeout", "" + 3 * neighborBroadcastPeriod));
     }
 
     private final int myPort;
@@ -747,6 +750,7 @@ public class NeuRonNode extends Thread {
                                 myNid = m.yourId;
                                 updateMembers(m.members);
                             } else if (msg instanceof Measurements) {
+                                resetTimeoutOnRendezvousClient(msg.src);
                                 updateMeasurements((Measurements) msg);
                             } else if (msg instanceof RoutingRecs) {
                                 RoutingRecs recs = (RoutingRecs) msg;
@@ -756,9 +760,6 @@ public class NeuRonNode extends Thread {
                                 // nothing to do, already handled above
                             } else if (msg instanceof Pong) {
                                 // nothing to do, already handled above
-                            } else if (msg instanceof PeeringRequest) {
-                                resetTimeoutOnRendezvousClient(msg.src);
-                                rendezvousClients.add(nodes.get(msg.src));
                             } else if (msg instanceof Init) {
                                 handleInit((Init) msg);
                             } else {
@@ -805,21 +806,34 @@ public class NeuRonNode extends Thread {
     }
 
     private final int clientTimeout;
+    
+    private final Hashtable<Short, ScheduledFuture<?>> rendezvousClientTimeouts = new Hashtable<Short, ScheduledFuture<?>>();
 
     private void resetTimeoutOnRendezvousClient(final short nid) {
         final NodeState node = nodes.get(nid);
         if (!node.isReachable) return;
 
-        ScheduledFuture<?> oldFuture = timeouts.get(nid);
+        ScheduledFuture<?> oldFuture = rendezvousClientTimeouts.get(nid);
         if (oldFuture != null) {
             oldFuture.cancel(false);
+        }
+        
+        if (rendezvousClients.add(node)) {
+            log("rendezvous client " + node + " added");
+            ///XXX
+            System.out.println("rendezvous client " + node + " added");
         }
 
         ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
             public void run() {
-                rendezvousClients.remove(scheduler);
+                if (rendezvousClients.remove(node)) {
+                    log("rendezvous client " + node + " removed");
+                    ///XXX
+                    System.out.println("rendezvous client " + node + " removed");
+                }
             }
         }), clientTimeout, TimeUnit.SECONDS);
+        rendezvousClientTimeouts.put(nid, future);
     }
 
     private void resetTimeoutAtNode(final short nid) {
@@ -1063,6 +1077,9 @@ public class NeuRonNode extends Thread {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
         }
         lastRendezvousServers.clear();
+        
+        allDefaultServers.clear();
+        allDefaultServers.addAll(rendezvousClients);
 
         for (int r0 = 0; r0 < numRows; r0++) {
             for (int c0 = 0; c0 < numCols; c0++) {
@@ -1071,7 +1088,7 @@ public class NeuRonNode extends Thread {
                     n.defaultClients.add(grid[r1][c0]);
                 for (int c1 = 0; c1 < numCols; c1++)
                     n.defaultClients.add(grid[r0][c1]);
-                n.defaultClients.remove(n);
+                n.defaultClients.remove(self);
             }
         }
 
@@ -1083,11 +1100,13 @@ public class NeuRonNode extends Thread {
      * @param remoteNid
      * @return
      */
-    private boolean isFailedRendezvous(NodeState n, short remoteNid) {
+    private boolean isFailedRendezvous(NodeState n, NodeState remote) {
         ///XXX
-        if (myNid == 1 && n.info.id == 7 && remoteNid == 8)
-            System.out.println("old remote failures " + n.remoteFailures);
-        return !n.isReachable || n.remoteFailures.contains(remoteNid);
+        if (myNid == 1 && n.info.id == 7 && remote.info.id == 8)
+            System.out.println("old remote failures " + n.remoteFailures
+                    + ", failed = "
+                    + (!n.isReachable || n.remoteFailures.contains(remote)));
+        return !n.isReachable || n.remoteFailures.contains(remote);
     }
 
     /**
@@ -1123,15 +1142,25 @@ public class NeuRonNode extends Thread {
                     // check if any of our default rendezvous servers are once
                     // more available; if so, add them back
                     HashSet<NodeState> defaults = defaultRendezvousServers.get(dst.info.id);
+                    HashSet<NodeState> old = null;
                     boolean cleared = false;
                     for (NodeState r : defaults) {
-                        if (!isFailedRendezvous(r, dst.info.id)) {
+                        if (r.isReachable) {
+                            servers.add(r);
+                        }
+                        if (!isFailedRendezvous(r, dst)) {
                             if (!cleared) {
+                                old =  new HashSet<NodeState>(rs);
                                 rs.clear();
                                 cleared = true;
                             }
                             rs.add(r);
                         }
+                    }
+                    if (cleared && !old.equals(rs)) {
+                        ///XXX
+                        System.out.println("restored rendezvous from " + old + " to " + rs);
+                        log("restored rendezvous from " + old + " to " + rs);
                     }
 
                     if (rs.isEmpty()) {
@@ -1154,9 +1183,12 @@ public class NeuRonNode extends Thread {
 
                         // choose candidate uniformly at random
                         NodeState failover = cands.get(rand.nextInt(cands.size()));
-                        log("new failover for " + dst + ": " + failover);
+                        log("new failover for " + dst + ": " + failover + ", rs = " + rs);
                         rs.add(failover);
                         servers.add(failover);
+                        
+                        ///XXX
+                        System.out.println("FAILOVER " + failover);
                     } else {
                         /*
                          * when we remove nodes now, don't immediately look
@@ -1166,12 +1198,18 @@ public class NeuRonNode extends Thread {
                          */
                         for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
                             NodeState r = i.next();
-                            if (isFailedRendezvous(r, dst.info.id)) {
+                            if (isFailedRendezvous(r, dst)) {
                                 i.remove();
                             } else {
                                 servers.add(r);
                             }
                         }
+
+                        ///XXX
+                        if (myNid == 1 && dst.info.id == 8)
+                            System.out.println(rs);
+                        if (rs.isEmpty())
+                            System.out.println("ALL FAILED!");
                     }
                 }
             }
@@ -1180,7 +1218,6 @@ public class NeuRonNode extends Thread {
         Collections.sort(list);
         return list;
     }
-
 
     public static enum RoutingScheme { SIMPLE, SQRT, SQRT_NOFAILOVER, SQRT_RC_FAILOVER, SQRT_SPECIAL };
     private final RoutingScheme scheme;
@@ -1226,8 +1263,7 @@ public class NeuRonNode extends Thread {
      */
     private void broadcastRecommendations() {
         ArrayList<NodeState> clients = getAllRendezvousClients();
-        @SuppressWarnings("unchecked")
-        ArrayList<NodeState> dsts = (ArrayList<NodeState>) clients.clone();
+        ArrayList<NodeState> dsts = new ArrayList<NodeState>(clients);
         dsts.add(nodes.get(myNid));
         Collections.sort(dsts);
         int totalSize = 0;
@@ -1236,6 +1272,10 @@ public class NeuRonNode extends Thread {
 
             // dst <- nbrs, hop <- any
             findHops(dsts, memberNids, src, recs);
+
+            ///XXX
+            if (myNid == 7 && src.info.id == 1)
+                System.out.println(routesToString(recs));
 
             /*
              * TODO: need to additionally send back info about *how good* the
@@ -1383,6 +1423,7 @@ public class NeuRonNode extends Thread {
         r.dstsPresent.clear();
         r.remoteFailures.clear();
         for (Rec rec : recs) {
+            r.dstsPresent.add(rec.dst);
             if (nodes.get(rec.via).isReachable) {
                 if (scheme == RoutingScheme.SQRT_SPECIAL) {
                     /*
@@ -1401,7 +1442,6 @@ public class NeuRonNode extends Thread {
                 } else {
                     // blindly trust the recommendations
                     nodes.get(rec.dst).hop = rec.via;
-                    r.dstsPresent.add(rec.dst);
                 }
             }
         }
