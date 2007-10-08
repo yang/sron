@@ -564,7 +564,7 @@ public class NeuRonNode extends Thread {
                          * first before the rendezvous servers is arbitrary.
                          */
                         Pair<Integer, Integer> p = findPathsForAllNodes();
-                        log(p.first + " live nodes, " + p.second + " avg paths");
+                        log(p.first + " live nodes, " + p.second + " avg paths, " + nodes.get(myNid).latencies.keySet().size() + " direct paths");
                         ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ?
                                 getAllReachableNodes() : getAllRendezvousServers();
                         broadcastMeasurements(measRecips);

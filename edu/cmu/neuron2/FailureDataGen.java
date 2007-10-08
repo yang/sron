@@ -19,6 +19,7 @@ public class FailureDataGen {
 
             Random generator = new Random(System.currentTimeMillis());
             Random generator2 = new Random(System.currentTimeMillis() + 1000);
+            Random generator3 = new Random(System.currentTimeMillis() / 2);
 
             int numFailures = (failurePercent * numNodes * (numNodes -1)) / 100;
 
@@ -26,9 +27,22 @@ public class FailureDataGen {
                 int randomSrc = generator.nextInt(numNodes) + 1;
                 int randomDst = generator.nextInt(numNodes) + 1;
 
-                float timeInSec = generator2.nextInt(runTime);
+                float startTimeInSec = generator2.nextInt(runTime);
+                float duration = generator2.nextInt(runTime);
 
-                System.out.println(randomSrc + " " + randomDst + " " + timeInSec + " " + runTime);
+                // this is just one model
+                // there is no justification as to why this failure model is important.
+                // Although there are overlapping failures here, it might be interesting to see
+                // how the system responds to f% of overlapping failures
+
+                // also the duration of failures should ideally be picked from a distribution that is seen in the real world.
+
+                // so the best thing to do would probably be just apply real world data,
+                // but this is a starting point till we have real world failure data.
+
+                System.out.println(randomSrc + " " + randomDst + " " + startTimeInSec + " " + (startTimeInSec + duration));
+                //System.out.println(randomSrc + " " + randomDst + " " + startTimeInSec + " " + runTime);
+
             }
 
         }
