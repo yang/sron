@@ -47,6 +47,35 @@ get_subdir = '"#{datadir}/#{scheme}/n#{num_nodes}/f#{failure_rate}/r#{run}"'
 
 sys('make')
 
+def agg_runs(scheme, num_nodes, failure_rate, xs)
+  for run in 1..$num_runs
+    subdir = eval get_subdir
+    puts subdir
+
+    for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
+      puts path
+      if File.file? path
+        File.open(path) do |f|
+          begin
+            startTime = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
+            f.seek(0)
+            bytes, endTime = 0, 0
+            f.grep(/sent (measurements|recs)/) do |line|
+              fields = line.split(' ')
+              endTime = Integer(fields[0])
+              fields = line.split(', ')
+              bytes += fields[1].split(' ')[0].to_i
+            end
+            xs << (bytes.to_f * 8/1000) / ((endTime - startTime) / 1000.0)
+          rescue
+          end
+        end
+      end
+    end
+
+  end # run
+end
+
 case mode
 when 'run'
   for scheme in schemes
@@ -79,58 +108,39 @@ when 'run'
   end
 
 when 'agg'
-  for scheme in schemes
-    for num_nodes in num_nodes_range
-
-      xs = []
-
-      for failure_rate in failure_rate_range
-
-        if subject == 'failures'
-          xs = []
-        end
-
-        for run in 1..num_runs
-          subdir = eval get_subdir
-          puts subdir
-
-          for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
-            puts path
-            if File.file? path
-              File.open(path) do |f|
-                begin
-                  startTime = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
-                  f.seek(0)
-                  bytes, endTime = 0, 0
-                  f.grep(/sent (measurements|recs)/) do |line|
-                    fields = line.split(' ')
-                    endTime = Integer(fields[0])
-                    fields = line.split(', ')
-                    bytes += fields[1].split(' ')[0].to_i
-                  end
-                  xs << (bytes.to_f * 8/1000) / ((endTime - startTime) / 1000.0)
-                rescue
-                end
-              end
-            end
-          end
-
-        end # run
-
-        if subject == 'nofailures'
-          xs.to_i
-        end
-
-      end # failure_rate
-
-      # aggregate and append to file
-      avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
+  case subject
+  when 'failures'
+    for scheme in schemes
       File.open("#{datadir}/#{scheme}.dat", 'a') do |out|
+        for num_nodes in num_nodes_range
+          xs = []
+          for failure_rate in failure_rate_range
+            agg_runs(scheme, num_nodes, failure_rate, xs)
+          end # failure_rate
+        end
+        # aggregate and append to file
+        avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
         out.puts "#{num_nodes} #{avg_size}"
       end
+    end
 
-    end # num_nodes
-  end # scheme
+  # same as above, but one file per num_nodes, and now the x-axis is not
+  # num_nodes but rather the failure_rate
+  when 'nofailures'
+    for scheme in schemes
+      for num_nodes in num_nodes_range
+        File.open("#{datadir}/#{scheme}-failures-n#{num_nodes}.dat", 'a') do |out|
+          xs = []
+          for failure_rate in failure_rate_range
+            agg_runs(scheme, num_nodes, failure_rate, xs)
+          end # failure_rate
+          # aggregate and append to file
+          avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
+          out.puts "#{failure_rate} #{avg_size}"
+        end
+      end
+    end
+  end
 
 when 'plot'
   remkdir(graphdir)
