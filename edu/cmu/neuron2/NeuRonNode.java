@@ -1163,7 +1163,7 @@ public class NeuRonNode extends Thread {
                         log("restored rendezvous from " + old + " to " + rs);
                     }
 
-                    if (rs.isEmpty()) {
+                    if (rs.isEmpty() && (scheme != RoutingScheme.SQRT_NOFAILOVER)) {
                         // look for failovers
 
                         // get candidates from col
