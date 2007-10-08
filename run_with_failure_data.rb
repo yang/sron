@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 # vim:et:sw=2:ts=2
 
-BASEDIR = "."
-puts BASEDIR
-DATA_DUMP_DIR = "#{BASEDIR}/data/failure"
+require 'fileutils'
 
-system("mkdir -p #{DATA_DUMP_DIR}");
+basedir = "."
+puts basedir
+datadir = "#{basedir}/data"
+
+system("mkdir -p #{datadir}");
 
 # 2*5*2*5 = 100 runs (200 mins)
 for run in 1..2
@@ -22,7 +24,7 @@ for run in 1..2
       for scheme in ["simple", "sqrt"]
         puts "running experiment ..."
         puts "-----> scheme = #{scheme}, numNode = #{numNodes}, failureRate = #{failureRate}%, run# = #{run}"
-        subdir = "#{DATA_DUMP_DIR}/#{scheme}/#{numNodes}/#{failureRate}/#{run}"
+        subdir = "#{datadir}/#{scheme}/#{numNodes}/#{failureRate}/#{run}"
         system("mkdir -p #{subdir}");
         system("rm -f #{subdir}/*");
 

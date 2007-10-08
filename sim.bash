@@ -6,6 +6,12 @@ set -o nounset
 
 basedir=.
 datadir="$basedir/data"
+failures={1..8}
+
+case $1 in
+  failure ) \
+    schemes=simple sqrt
+    num_nodes_range=
 
 silence() {
   "$@" >& /dev/null || true
@@ -20,18 +26,21 @@ if [[ "$1" == clean ]]
 then echo cleaning; remkdir "$datadir"; shift
 fi
 
-for scheme in simple sqrt ; do # sqrt_special ; do
-  for numnodes in "$@" ; do
-    echo $scheme $numnodes
-    subdir="$datadir/$scheme/$numnodes"
-    remkdir "$subdir"
-    ./run.bash \
-        -DtotalTime=60 \
-        -DlogFileBase="$subdir/" \
-        -DfileLogFilter='send.Ping recv.Ping send.Pong recv.Pong' \
-        -DconsoleLogFilter=all \
-        -DnumNodes=$numnodes \
-        -Dscheme=$scheme \
-        > /dev/null
+for scheme in $schemes ; do # sqrt_special ; do
+  for num_nodes in $num_nodes_range ; do
+    for num_failures in $num_failures_range ; do
+      for run in $runs ; do
+        echo $scheme $num_nodes
+        subdir="$datadir/$scheme/$num_nodes"
+        remkdir "$subdir"
+        ./run.bash \
+            -DtotalTime=200 \
+            -DlogFileBase="$subdir/" \
+            -DconsoleLogFilter=all \
+            -DnumNodes=$num_nodes \
+            -Dscheme=$scheme \
+            > /dev/null
+      done
+    done
   done
 done
