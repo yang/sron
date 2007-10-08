@@ -779,7 +779,10 @@ public class NeuRonNode extends Thread {
                                 throw new Exception("can't handle that message type");
                             }
                         } else {
-                            log("stale." + msg.getClass().getSimpleName(), "from " + msg.src + " version " + msg.version);
+                            log("stale." + msg.getClass().getSimpleName(),
+                                    "from " + msg.src + " version "
+                                            + msg.version + " current "
+                                            + currentStateVersion);
                         }
                     } else {
                         // log("ignored." + msg.getClass().getSimpleName(), "ignored from " + msg.src + " session " + msg.session);
@@ -895,12 +898,6 @@ public class NeuRonNode extends Thread {
         return info;
     }
 
-    private ArrayList<Short> getUncachedmemberNids() {
-        ArrayList<Short> nids = new ArrayList<Short>(nodes.keySet());
-        Collections.sort(nids);
-        return nids;
-    }
-
     private final AtomicBoolean membersChanged = new AtomicBoolean();
 
     /**
@@ -912,7 +909,7 @@ public class NeuRonNode extends Thread {
      */
     private void broadcastMembershipChange(short exceptNid) {
         if (exceptNid == 0 || membershipBroadcastPeriod == 0) {
-            for (short nid : nodes.keySet()) {
+            for (short nid : coordNodes.keySet()) {
                 if (nid != exceptNid) {
                     sendMembership(nid);
                 }
