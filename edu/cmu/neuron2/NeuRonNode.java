@@ -566,7 +566,7 @@ public class NeuRonNode extends Thread {
                         Pair<Integer, Integer> p = findPathsForAllNodes();
                         log(p.first + " live nodes, " + p.second + " avg paths");
                         ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ?
-                                otherNodes : getAllRendezvousServers();
+                                getAllReachableNodes() : getAllRendezvousServers();
                         broadcastMeasurements(measRecips);
                         if (scheme != RoutingScheme.SIMPLE) {
                             broadcastRecommendations();
@@ -594,6 +594,14 @@ public class NeuRonNode extends Thread {
             log("unignoring " + nid);
             ignored.remove(nid);
         }
+    }
+    
+    private ArrayList<NodeState> getAllReachableNodes() {
+        ArrayList<NodeState> nbrs = new ArrayList<NodeState>();
+        for (NodeState n : otherNodes)
+            if (n.isReachable)
+                nbrs.add(n);
+        return nbrs;
     }
 
     private void pingAll() {
@@ -1183,8 +1191,8 @@ public class NeuRonNode extends Thread {
                     }
                     if (!old.equals(rs)) {
                         ///XXX
-                        System.out.println("restored rendezvous for " + dst + " from " + old + " to " + rs);
-                        log("restored rendezvous for " + dst + " from " + old + " to " + rs);
+                        System.out.println("restored rendezvous server for " + dst + " from " + old + " to " + rs);
+                        log("restored rendezvous server for " + dst + " from " + old + " to " + rs);
                     }
 
                     if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
