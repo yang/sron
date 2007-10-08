@@ -175,10 +175,14 @@ public class NeuRonNode extends Thread {
         final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
         handler.setFilter(new LabelFilter(suppressedLabels));
     }
+    
+    private final int joinDelay;
 
     public NeuRonNode(short id, ExecutorService executor, ScheduledExecutorService scheduler,
                         Properties props, short numNodes, Semaphore semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode) {
+        
+        joinDelay = rand.nextInt(Integer.parseInt(props.getProperty("joinDelayRange", "1")));
 
         if ((coordNode == null) || (coordNode.addr == null)){
             throw new RuntimeException("coordNode is null!");
@@ -467,6 +471,11 @@ public class NeuRonNode extends Thread {
             }
         } else {
             int count = 0;
+            try {
+                Thread.sleep(1000 * joinDelay);
+            } catch (InterruptedException ex) {
+                throw new RuntimeException(ex);
+            }
             while (true) {
                 Socket s = null;
                 try {
