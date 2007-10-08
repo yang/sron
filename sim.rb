@@ -21,9 +21,9 @@ end
 
 case subject
 when 'failures'
-  schemes = ["simple", "sqrt"]
-  num_nodes_range = [10, 50]
-  failure_rate_range = [25, 50, 75]
+  schemes = ["simple", "sqrt", "sqrt_nofailover"]
+  num_nodes_range = [10, 50, 100]
+  failure_rate_range = [10, 25, 50, 75]
   num_runs = 2
 when 'nofailures'
   schemes = ["simple", "sqrt"]
@@ -61,16 +61,16 @@ when 'run'
           # arg
           if failure_rate > 0
             sys("java -cp scaleron.jar edu.cmu.neuron2.FailureDataGen" +
-                " #{failure_rate} #{num_nodes} 60 > #{subdir}/failures.dat")
+                " #{failure_rate} #{num_nodes} 120 > #{subdir}/failures.dat")
             simdata = "-DsimData=#{subdir}/failures.dat"
           else
             simdata = ''
           end
 
           # run for all configs with the same failure data set.
-          sys("./run.bash -DtotalTime=200 -DconsoleLogFilter=all" +
+          sys("./run.bash -DtotalTime=120 -DconsoleLogFilter=all" +
               " -DnumNodes=#{num_nodes} -Dscheme=#{scheme}" +
-              " -DprobePeriod=10 -DneighborBroadcastPeriod=60" +
+              " -DprobePeriod=10 -DneighborBroadcastPeriod=30" +
               " #{simdata}" +
               " -DlogFileBase=#{subdir}/ > /dev/null")
         end
