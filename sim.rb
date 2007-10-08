@@ -47,6 +47,14 @@ get_subdir = '"#{datadir}/#{scheme}/n#{num_nodes}/f#{failure_rate}/r#{run}"'
 
 sys('make')
 
+def is_nonzero_int_and_file(x)
+  begin
+    Integer( File.basename(x) ) != 0 and File.file? x
+  rescue
+    false
+  end
+end
+
 $num_runs = num_runs
 $get_subdir = get_subdir
 $datadir = datadir
@@ -56,33 +64,31 @@ def agg_runs(scheme, num_nodes, failure_rate, xs)
     subdir = eval $get_subdir
     puts subdir
 
-    def is_nonzero_int_and_file(x)
-      begin
-        Integer( File.basename(x) ) != 0 and File.file? x
-      rescue
-        false
-      end
-    end
-
     for path in Dir["#{subdir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
       File.open(path) do |f|
         begin
-          startTime = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
+          start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
           f.seek(0)
-          bytes, endTime = 0, 0
+          bytes, end_time = 0, 0
           f.grep(/sent (measurements|recs)/) do |line|
             fields = line.split(' ')
-            endTime = Integer(fields[0])
+            end_time = Integer(fields[0])
             fields = line.split(', ')
             bytes += fields[1].split(' ')[0].to_i
           end
-          xs << (bytes.to_f * 8/1000) / ((endTime - startTime) / 1000.0)
+          xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
         rescue
         end
       end
     end
 
   end # run
+end
+
+# aggregate xs and append to out file
+def append_agg(xs, out, param)
+  avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
+  out.puts "#{param} #{avg_size}"
 end
 
 case mode
@@ -118,34 +124,66 @@ when 'run'
 
 when 'agg'
   case subject
-  when 'failures'
+  when 'nofailures'
     for scheme in schemes
-      File.open("#{datadir}/#{scheme}.dat", 'a') do |out|
+      File.open("#{datadir}/bandwidth-#{scheme}-nofailures.dat", 'a') do |out|
         for num_nodes in num_nodes_range
           xs = []
-          for failure_rate in failure_rate_range
-            agg_runs(scheme, num_nodes, failure_rate, xs)
-          end # failure_rate
+          agg_runs(scheme, num_nodes, failure_rate, xs)
+          append_agg(xs,out,num_nodes)
         end
-        # aggregate and append to file
-        avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
-        out.puts "#{num_nodes} #{avg_size}"
       end
     end
 
   # same as above, but one file per num_nodes, and now the x-axis is not
   # num_nodes but rather the failure_rate
-  when 'nofailures'
+  when 'failures'
     for scheme in schemes
       for num_nodes in num_nodes_range
-        File.open("#{datadir}/#{scheme}-failures-n#{num_nodes}.dat", 'a') do |out|
-          xs = []
+        File.open("#{datadir}/bandwidth-#{scheme}-failures-n#{num_nodes}.dat", 'a') do |out|
           for failure_rate in failure_rate_range
+            xs = []
             agg_runs(scheme, num_nodes, failure_rate, xs)
-          end # failure_rate
-          # aggregate and append to file
-          avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
-          out.puts "#{failure_rate} #{avg_size}"
+            append_agg(xs,out,failure_rate)
+          end
+        end
+      end
+    end
+
+    for scheme in schemes
+      for num_nodes in num_nodes_range
+        File.open("#{datadir}/availability-#{scheme}-failures-n#{num_nodes}.dat", 'a') do |out|
+          for failure_rate in failure_rate_range
+            xs = []
+
+            for run in 1..num_runs
+              subdir = eval get_subdir
+              puts subdir
+
+              for path in Dir["#{subdir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
+                File.open(path) do |f|
+                  begin
+                    start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
+                    f.seek(0)
+                    live_nodes, avg_paths, count, end_time = 0, 0, 0, 0
+                    f.grep(/ live nodes, /) do |line|
+                      fields = line.split(': ')
+                      end_time = Integer(fields[0].split(' ')[0])
+                      fields = fields[1].split(', ')
+                      live_nodes += fields[0].split(' ')[0].to_i
+                      avg_paths += fields[1].split(' ')[0].to_i
+                      count += 1
+                    end
+                    xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
+                  rescue
+                  end
+                end
+              end
+
+            end # run
+
+            append_agg(xs,out,failure_rate)
+          end
         end
       end
     end
