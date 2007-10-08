@@ -47,28 +47,37 @@ get_subdir = '"#{datadir}/#{scheme}/n#{num_nodes}/f#{failure_rate}/r#{run}"'
 
 sys('make')
 
+$num_runs = num_runs
+$get_subdir = get_subdir
+$datadir = datadir
 def agg_runs(scheme, num_nodes, failure_rate, xs)
+  datadir = $datadir
   for run in 1..$num_runs
-    subdir = eval get_subdir
+    subdir = eval $get_subdir
     puts subdir
 
-    for path in Dir["#{subdir}/*"].delete_if{|x| x[-1] == '0'[0]}
-      puts path
-      if File.file? path
-        File.open(path) do |f|
-          begin
-            startTime = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
-            f.seek(0)
-            bytes, endTime = 0, 0
-            f.grep(/sent (measurements|recs)/) do |line|
-              fields = line.split(' ')
-              endTime = Integer(fields[0])
-              fields = line.split(', ')
-              bytes += fields[1].split(' ')[0].to_i
-            end
-            xs << (bytes.to_f * 8/1000) / ((endTime - startTime) / 1000.0)
-          rescue
+    def is_nonzero_int_and_file(x)
+      begin
+        Integer( File.basename(x) ) != 0 and File.file? x
+      rescue
+        false
+      end
+    end
+
+    for path in Dir["#{subdir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
+      File.open(path) do |f|
+        begin
+          startTime = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
+          f.seek(0)
+          bytes, endTime = 0, 0
+          f.grep(/sent (measurements|recs)/) do |line|
+            fields = line.split(' ')
+            endTime = Integer(fields[0])
+            fields = line.split(', ')
+            bytes += fields[1].split(' ')[0].to_i
           end
+          xs << (bytes.to_f * 8/1000) / ((endTime - startTime) / 1000.0)
+        rescue
         end
       end
     end
