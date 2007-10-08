@@ -116,7 +116,7 @@ when 'run'
               " -DnumNodes=#{num_nodes} -Dscheme=#{scheme}" +
               " -DprobePeriod=10 -DneighborBroadcastPeriod=30" +
               " #{simdata}" +
-              " -DlogFileBase=#{subdir}/ > /dev/null")
+              " -DlogFileBase=#{subdir}/")
         end
       end
     end
