@@ -924,7 +924,7 @@ public class NeuRonNode extends Thread {
         Membership msg = new Membership();
         msg.yourId = nid;
         msg.members = getMemberInfos();
-        sendObject(msg, nid);
+        sendObject(msg, coordNodes.get(nid));
     }
 
     /**
@@ -1146,28 +1146,42 @@ public class NeuRonNode extends Thread {
                     // check if any of our default rendezvous servers are once
                     // more available; if so, add them back
                     HashSet<NodeState> defaults = defaultRendezvousServers.get(dst.info.id);
-                    HashSet<NodeState> old = null;
-                    boolean cleared = false;
-                    for (NodeState r : defaults) {
-                        if (r.isReachable) {
+
+                    for (NodeState r : defaults)
+                        if (r.isReachable)
                             servers.add(r);
-                        }
-                        if (!isFailedRendezvous(r, dst)) {
-                            if (!cleared) {
-                                old =  new HashSet<NodeState>(rs);
-                                rs.clear();
-                                cleared = true;
-                            }
-                            rs.add(r);
-                        }
-                    }
-                    if (cleared && !old.equals(rs)) {
-                        ///XXX
-                        System.out.println("restored rendezvous from " + old + " to " + rs);
-                        log("restored rendezvous from " + old + " to " + rs);
+
+                    boolean hasDefaults = false;
+                    for (NodeState r : defaults) {
+                        hasDefaults = rs.contains(r);
+                        break;
                     }
 
-                    if (rs.isEmpty() && (scheme != RoutingScheme.SQRT_NOFAILOVER)) {
+                    HashSet<NodeState> old = new HashSet<NodeState>(rs);
+                    if (hasDefaults) {
+                        if (!defaults.equals(rs))
+                            for (NodeState r : defaults)
+                                if (!isFailedRendezvous(r, dst))
+                                    rs.add(r);
+                    } else {
+                        boolean cleared = false;
+                        for (NodeState r : defaults) {
+                            if (!isFailedRendezvous(r, dst)) {
+                                if (!cleared) {
+                                    rs.clear();
+                                    cleared = true;
+                                }
+                                rs.add(r);
+                            }
+                        }
+                    }
+                    if (!old.equals(rs)) {
+                        ///XXX
+                        System.out.println("restored rendezvous for " + dst + " from " + old + " to " + rs);
+                        log("restored rendezvous for " + dst + " from " + old + " to " + rs);
+                    }
+
+                    if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
                         // look for failovers
 
                         // get candidates from col
@@ -1187,7 +1201,7 @@ public class NeuRonNode extends Thread {
 
                         // choose candidate uniformly at random
                         NodeState failover = cands.get(rand.nextInt(cands.size()));
-                        log("new failover for " + dst + ": " + failover + ", rs = " + rs);
+                        log("new failover for " + dst + ": " + failover + ", prev rs = " + rs);
                         rs.add(failover);
                         servers.add(failover);
 
@@ -1212,8 +1226,10 @@ public class NeuRonNode extends Thread {
                         ///XXX
                         if (myNid == 1 && dst.info.id == 8)
                             System.out.println(rs);
-                        if (rs.isEmpty())
+                        if (rs.isEmpty()) {
+                            log("all rs to " + dst + " failed");
                             System.out.println("ALL FAILED!");
+                        }
                     }
                 }
             }
