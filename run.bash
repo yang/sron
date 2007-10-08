@@ -16,4 +16,4 @@ export CLASSPATH=$base/mina-core-1.1.2.jar:$base/slf4j-api-1.4.3.jar:$base/slf4j
 # it's important that we use exec, so that the java process actually takes the
 # current pid
 echo $$ > "$pidfile"
-exec java -ea "$@" edu.cmu.neuron2.RonTest
+exec java -Xms500M -Xmx500M -ea "$@" edu.cmu.neuron2.RonTest

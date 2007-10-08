@@ -29,7 +29,7 @@ for run in 1..2
         # run for all configs with the same failure data set.
         system("./run.bash -DtotalTime=200 -DconsoleLogFilter=all"
                " -DnumNodes=#{numNodes} -Dscheme=#{scheme}"
-               " -DprobePeriod=10 -DneighborBroadcastPeriod=60"
+               " -DprobePeriod=10 -DneighborBroadcastPeriod=30"
                " -DsimData=./fd/#{failureRate}/#{numNodes}/#{run}/failure_data.dat"
                " -DlogFileBase=#{subdir} > /dev/null")
       end
