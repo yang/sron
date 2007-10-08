@@ -23,7 +23,7 @@ case subject
 when 'failures'
   schemes = ["simple", "sqrt", "sqrt_nofailover"]
   num_nodes_range = [10, 50, 100]
-  failure_rate_range = [10, 25, 50, 75]
+  failure_rate_range = [5, 10, 25, 50, 75]
   num_runs = 2
 when 'nofailures'
   schemes = ["simple", "sqrt"]
