@@ -6,6 +6,7 @@ DATA_DUMP_DIR = "#{BASEDIR}/data"
 TEMPDIR = "./tmp"
 
 system("mkdir -p #{DATA_DUMP_DIR}");
+system("mkdir -p #{TEMPDIR}");
 system("rm #{TEMPDIR}/scaleron-log-*")
 
 #for runtype in ["simple", "sqrt", "sqrt_special"]
