@@ -6,7 +6,6 @@ require 'fileutils'
 basedir = "."
 datadir = "#{basedir}/data"
 graphdir = "#{basedir}/graphs"
-schemes = ["simple", "sqrt"]
 
 mode = ARGV[0]
 subject = ARGV[1]
@@ -22,10 +21,12 @@ end
 
 case subject
 when 'failures'
+  schemes = ["simple", "sqrt"]
   num_nodes_range = [10, 50]
-  failure_rate_range = [1, 2, 3, 4]
+  failure_rate_range = [25, 50, 75]
   num_runs = 2
 when 'nofailures'
+  schemes = ["simple", "sqrt"]
   num_nodes_range = [10, 20, 30, 40]
   failure_rate_range = [0]
   num_runs = 1
@@ -43,19 +44,6 @@ def remkdir(path)
 end
 
 get_subdir = '"#{datadir}/#{scheme}/n#{num_nodes}/f#{failure_rate}/r#{run}"'
-
-def iterate()
-  for scheme in schemes
-    for num_nodes in num_nodes_range
-      for failure_rate in failure_rate_range
-        for run in 1..num_runs
-          eval get_subdir
-          yield(scheme, num_nodes, failure_rate, run, sub_dir)
-        end
-      end
-    end
-  end
-end
 
 sys('make')
 
@@ -97,6 +85,11 @@ when 'agg'
       xs = []
 
       for failure_rate in failure_rate_range
+
+        if subject == 'failures'
+          xs = []
+        end
+
         for run in 1..num_runs
           subdir = eval get_subdir
           puts subdir
@@ -123,6 +116,11 @@ when 'agg'
           end
 
         end # run
+
+        if subject == 'nofailures'
+          xs.to_i
+        end
+
       end # failure_rate
 
       # aggregate and append to file
