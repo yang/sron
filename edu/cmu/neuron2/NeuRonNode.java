@@ -1499,6 +1499,8 @@ public class NeuRonNode extends Thread {
         short nid = node.info.id;
 
         node.hop = node.isReachable ? node.info.id : 0;
+        if (node.isReachable)
+            options.add(node);
 
         // find best rendezvous client. note that this includes node itself.
         short min = resetLatency;
