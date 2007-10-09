@@ -642,13 +642,13 @@ public class NeuRonNode extends Thread {
                 scheduler.schedule(safeRun(new Runnable() {
                     private int count = 0;
                     public void run() {
-                        if (count > NeuRonNode.this.joinRetries) {
+                        if (count > joinRetries) {
                             warn("exceeded max tries!");
                             System.exit(0);
                         } else if (!hasJoined) {
                             log("sending join to coordinator at "
                                     + coordinatorHost + ":" + basePort
-                                    + " (try " + count + ")");
+                                    + " (try " + count++ + ")");
                             Join msg = new Join();
                             msg.addr = myCachedAddr;
                             msg.src = myNid; // informs coord of orig id
@@ -854,7 +854,9 @@ public class NeuRonNode extends Thread {
                             && msg.session == sessionId) {
                         NodeState state = nodes.get(msg.src);
 
-                        log("recv." + msg.getClass().getSimpleName(), "from " + msg.src);
+                        log("recv." + msg.getClass().getSimpleName(), "from "
+                                + msg.src + " len "
+                                + msg.getClass().getSimpleName());
 
                         // always reply to pings and log pongs
 

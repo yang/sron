@@ -22,11 +22,11 @@ def is_nonzero_int_and_file(x)
 end
 
 puts "************************************************************"
-for numNodes in [10, 50, 100]
+for numNodes in [50]
     for runtype in schemes
         out = File.new("#{DATA_DIR}/bw_#{numNodes}_#{runtype}.dat", "w")
 
-        for failureRate in [5, 10, 25, 50, 75]
+        for failureRate in [25, 50, 75, 90]
 
             xs = []
             for run in 1..numRuns
@@ -40,15 +40,29 @@ for numNodes in [10, 50, 100]
                 for path in Dir["#{sub_dir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
                     File.open(path) do |f|
                         begin
-                            start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
-                            f.seek(0)
+                            start_time = Integer(f.grep('server started')[0].split(' ', 2)[0])
                             bytes, end_time = 0, 0
+
+                            # count outgoing messages
+                            f.seek(0)
                             f.grep(/sent (measurements|recs)/) do |line|
                                 fields = line.split(' ')
-                                end_time = Integer(fields[0])
+                                end_time = [end_time, Integer(fields[0])].max()
                                 fields = line.split(', ')
                                 bytes += fields[1].split(' ')[0].to_i
                             end
+
+                            # count incoming messages
+                            f.seek(0)
+                            regex = Regexp.new('(\d+) .*recv.(?:Measurements|RoutingRecs).*len (\d+)')
+                            f.each do |line|
+                                match = regex.match(line)
+                                if match
+                                    end_time = [end_time, Integer(match[1])].max()
+                                    bytes += match[2].to_i
+                                end
+                            end
+
                             node_bw = (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
                             #puts node_bw
                             bw_dat.puts "#{node_bw}"
@@ -78,7 +92,7 @@ for numNodes in [10, 50, 100]
     end
 end
 
-for numNodes in [10, 50, 100]
+for numNodes in [50]
     for gtype in ["monochrome", "color"]
         plots = []
         for scheme in schemes

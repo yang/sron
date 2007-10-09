@@ -22,11 +22,11 @@ def is_nonzero_int_and_file(x)
 end
 
 puts "************************************************************"
-for numNodes in [10, 50, 100]
+for numNodes in [50]
     for runtype in schemes
         out = File.new("#{DATA_DIR}/reachable_#{numNodes}_#{runtype}.dat", "w")
 
-        for failureRate in [5, 10, 25, 50, 75]
+        for failureRate in [25, 50, 75, 90]
 
             for run in 1..numRuns
                 puts "-----> runtype = #{runtype}, numNode = #{numNodes}, failureRate = #{failureRate}%, run# = #{run}"
@@ -105,7 +105,7 @@ for numNodes in [10, 50, 100]
     end
 end
 
-for numNodes in [10, 50, 100]
+for numNodes in [50]
     for gtype in ["monochrome", "color"]
         plots = []
         for scheme in schemes
