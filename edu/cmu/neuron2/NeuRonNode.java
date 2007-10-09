@@ -402,7 +402,6 @@ public class NeuRonNode extends Thread {
                                         incomingSocks.put(nodeId, incoming);
                                         if (!capJoins || coordNodes.size() < numNodesHint) {
                                             addMember(nodeId, msg.addr, msg.port, msg.src);
-
                                             if (blockJoins) {
                                                 if (coordNodes.size() >= numNodesHint) {
                                                     // time to broadcast ims to everyone
@@ -421,16 +420,16 @@ public class NeuRonNode extends Thread {
                                                 doit(incomingSocks, getMemberInfos(), nodeId);
                                                 broadcastMembershipChange(nodeId);
                                             }
+
+                                            if (coordNodes.size() == numNodesHint) {
+                                                semAllJoined.release();
+                                            }
                                         } else if (capJoins && coordNodes.size() == numNodesHint) {
                                             Init im = new Init();
                                             im.src = myNid;
                                             im.id = -1;
                                             im.members = new ArrayList<NodeInfo>();
                                             sendit(incoming, im);
-                                        }
-
-                                        if (coordNodes.size() == numNodesHint) {
-                                            semAllJoined.release();
                                         }
                                     }
                                 } catch (Exception ex) {
