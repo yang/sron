@@ -3,10 +3,10 @@
 
 require 'fileutils'
 
-debug = true
+debug = false
 
 basedir = "."
-datadir = if debug "#{basedir}/data2" else "#{basedir}/data"
+datadir = if debug then "#{basedir}/data2" else "#{basedir}/data" end
 graphdir = "#{basedir}/graphs"
 tmpdir = '/tmp'
 
@@ -34,7 +34,7 @@ when 'failures'
   failure_rate_range = [5, 25, 50, 75, 90] # [50,90]
   num_nodes_range = [50]
   num_runs = 2
-  schemes = ["simple", "sqrt", "sqrt_special"]
+  schemes = ["simple", "sqrt"]
 
   if debug
     failure_rate_range = [50,90]
@@ -180,7 +180,7 @@ when 'agg'
       for num_nodes in num_nodes_range
         for scheme in schemes
           File.open("#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat", "w") do |out|
-            for failure_rate in [50, 90]
+            for failure_rate in failure_rate_range
               xs = []
               for run in 1..num_runs
                 subdir = eval get_subdir
@@ -413,6 +413,7 @@ when 'plot'
         for gtype in ["monochrome", "color"]
           plots = []
           for scheme in schemes
+            puts "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme}'"
             plots << "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme}'"
           end
           plots = plots.join(', ')
