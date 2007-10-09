@@ -10,8 +10,8 @@ TMP_DIR = "#{BASEDIR}/tmp"
 
 system("mkdir -p #{TMP_DIR}");
 
-numRuns = 2
-schemes = ["simple", "sqrt", "sqrt_nofailover"]
+numRuns = 1
+schemes = ["sqrt"]
 
 def is_nonzero_int_and_file(x)
   begin
@@ -21,12 +21,14 @@ def is_nonzero_int_and_file(x)
   end
 end
 
+if true
 puts "************************************************************"
 for numNodes in [50]
     for runtype in schemes
-        out = File.new("#{DATA_DIR}/bw_#{numNodes}_#{runtype}.dat", "w")
+        allout = File.new("#{DATA_DIR}/bw_#{numNodes}_#{runtype}_all.dat", "w")
+        out = File.new("#{DATA_DIR}/bw_#{numNodes}_#{runtype}_avg.dat", "w")
 
-        for failureRate in [25, 50, 75, 90]
+        for failureRate in [50, 90]
 
             xs = []
             for run in 1..numRuns
@@ -40,7 +42,7 @@ for numNodes in [50]
                 for path in Dir["#{sub_dir}/*"].delete_if{|x| not is_nonzero_int_and_file(x)}
                     File.open(path) do |f|
                         begin
-                            start_time = Integer(f.grep('server started')[0].split(' ', 2)[0])
+                            start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
                             bytes, end_time = 0, 0
 
                             # count outgoing messages
@@ -64,7 +66,6 @@ for numNodes in [50]
                             end
 
                             node_bw = (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
-                            #puts node_bw
                             bw_dat.puts "#{node_bw}"
                         rescue
                         end
@@ -79,24 +80,32 @@ for numNodes in [50]
             # has one line per run
             avg_bw_dat = File.new("#{f_dir}/avg_bw.dat", "w")
             for run in 1..numRuns
-                stats = `cat #{f_dir}/r#{run}/bw.dat | ~/tools/UnixStat/bin/stats min max mean`
+                stats = `cat #{f_dir}/r#{run}/bw.dat | ../../tools/UnixStat/bin/stats min max mean`
                 avg_bw_dat.puts "#{stats}"
             end
             avg_bw_dat.close
 
-            avg_bw_across_runs = `cat #{f_dir}/avg_bw.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats mean`
+            min_bw_across_runs = `cat #{f_dir}/avg_bw.dat | awk '{print $1}' | ../../tools/UnixStat/bin/stats mean`
+            max_bw_across_runs = `cat #{f_dir}/avg_bw.dat | awk '{print $2}' | ../../tools/UnixStat/bin/stats mean`
+            avg_bw_across_runs = `cat #{f_dir}/avg_bw.dat | awk '{print $3}' | ../../tools/UnixStat/bin/stats mean`
+            puts "#{failureRate} #{min_bw_across_runs.chomp} #{avg_bw_across_runs.chomp} #{max_bw_across_runs.chomp}"
+            allout.puts "#{failureRate} #{min_bw_across_runs.chomp} #{avg_bw_across_runs.chomp} #{max_bw_across_runs.chomp}"
+
+            puts "#{failureRate} #{avg_bw_across_runs.chomp}"
             out.puts "#{failureRate} #{avg_bw_across_runs.chomp}"
 
         end
         out.close
+        allout.close
     end
+end
 end
 
 for numNodes in [50]
     for gtype in ["monochrome", "color"]
         plots = []
         for scheme in schemes
-            plots << "'#{DATA_DIR}/bw_#{numNodes}_#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+            plots << "'#{DATA_DIR}/bw_#{numNodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme}'"
         end
         plots = plots.join(', ')
 

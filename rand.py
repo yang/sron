@@ -8,12 +8,12 @@ percent = int(argv[1])
 n = int(argv[2])
 total_time = int(argv[3])
 
-pairs = [ (i,j) for i in range(n) for j in range(n) ]
+pairs = [ (i,j) for i in range(n) for j in range(i+1,n) ]
 start = 47
 end = total_time + 10
 
 r = Random()
-count = int( float( percent ) / 100 * n )
+count = int( float( percent ) / 100 * len(pairs) )
 r.shuffle(pairs)
 failures = [ (pair, start, end) for pair in pairs[:count] ]
 

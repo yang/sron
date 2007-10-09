@@ -10,8 +10,8 @@ TMP_DIR = "#{BASEDIR}/tmp"
 
 system("mkdir -p #{TMP_DIR}");
 
-numRuns = 2
-schemes = ["simple", "sqrt", "sqrt_nofailover"]
+numRuns = 1
+schemes = ["sqrt"]
 
 def is_nonzero_int_and_file(x)
   begin
@@ -22,11 +22,12 @@ def is_nonzero_int_and_file(x)
 end
 
 puts "************************************************************"
+if true
 for numNodes in [50]
     for runtype in schemes
         out = File.new("#{DATA_DIR}/reachable_#{numNodes}_#{runtype}.dat", "w")
 
-        for failureRate in [25, 50, 75, 90]
+        for failureRate in [50, 90]
 
             for run in 1..numRuns
                 puts "-----> runtype = #{runtype}, numNode = #{numNodes}, failureRate = #{failureRate}%, run# = #{run}"
@@ -58,12 +59,12 @@ for numNodes in [50]
                                 tmp_file.puts "#{live_nodes} #{num_paths} #{numNodes}"
                             end
                             tmp_file.close
-                            stats = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $1}' | ~/tools/UnixStat/bin/stats min max mean`
-                            stats2 = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $2}' | ~/tools/UnixStat/bin/stats min max mean`
-                            #stats3 = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats min max mean`
+                            stats = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $1}' | ../..//tools/UnixStat/bin/stats min max mean`
+                            stats2 = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $2}' | ../..//tools/UnixStat/bin/stats min max mean`
+                            #stats3 = `cat #{TMP_DIR}/stats_n#{numNodes}_tmp.dat | awk '{print $3}' | ../..//tools/UnixStat/bin/stats min max mean`
 
-                            puts "reachable => #{stats}"
-                            puts "available hops => #{stats2}"
+                            # puts "reachable => #{stats}"
+                            # puts "available hops => #{stats2}"
 
                             reachable_dat.puts "#{stats}"
                             available_dat.puts "#{stats2}"
@@ -86,23 +87,25 @@ for numNodes in [50]
             avg_available_hops_dat = File.new("#{f_dir}/avg_available_hops.dat", "w")
             for run in 1..numRuns
                 # we are interested in the mean value in each of these files
-                stats = `cat #{f_dir}/r#{run}/reachable.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats min max mean`
+                stats = `cat #{f_dir}/r#{run}/reachable.dat | awk '{print $3}' | ../..//tools/UnixStat/bin/stats min max mean`
                 avg_reachable_dat.puts "#{stats}"
-                stats2 = `cat #{f_dir}/r#{run}/available_hops.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats min max mean`
+                stats2 = `cat #{f_dir}/r#{run}/available_hops.dat | awk '{print $3}' | ../..//tools/UnixStat/bin/stats min max mean`
                 avg_available_hops_dat.puts "#{stats2}"
             end
             avg_reachable_dat.close
             avg_available_hops_dat.close
 
             # 
-            avg_reachability_across_runs = `cat #{f_dir}/avg_reachable.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats mean`
-            avg_available_hops_across_runs = `cat #{f_dir}/avg_available_hops.dat | awk '{print $3}' | ~/tools/UnixStat/bin/stats mean`
+            avg_reachability_across_runs = `cat #{f_dir}/avg_reachable.dat | awk '{print $3}' | ../..//tools/UnixStat/bin/stats mean`
+            avg_available_hops_across_runs = `cat #{f_dir}/avg_available_hops.dat | awk '{print $3}' | ../..//tools/UnixStat/bin/stats mean`
 
+            puts "#{failureRate} #{avg_reachability_across_runs.chomp} #{avg_available_hops_across_runs.chomp}"
             out.puts "#{failureRate} #{avg_reachability_across_runs.chomp} #{avg_available_hops_across_runs.chomp}"
             
         end
         out.close
     end
+end
 end
 
 for numNodes in [50]
