@@ -8,6 +8,8 @@ DATA_DIR = "#{BASEDIR}/data"
 GRAPH_DIR = "#{BASEDIR}/graphs"
 TMP_DIR = "#{BASEDIR}/tmp"
 
+system("mkdir -p #{TMP_DIR}");
+
 numRuns = 2
 schemes = ["simple", "sqrt", "sqrt_nofailover"]
 
