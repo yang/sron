@@ -192,7 +192,6 @@ public class NeuRonNode extends Thread {
 
         myNid = id;
         origNid = id;
-        currentStateVersion = (short)0;
         cachedMemberNidsVersion = (short)-1;
         joinRetries = Integer.parseInt(props.getProperty("joinTimeLimit", "10")); // wait up to 10 secs by default for coord to be available
         membershipBroadcastPeriod = Integer.parseInt(props.getProperty("membershipBroadcastPeriod", "0"));
@@ -254,6 +253,7 @@ public class NeuRonNode extends Thread {
         grid = null;
         numCols = numRows = 0;
         isCoordinator = myNid == 0;
+        currentStateVersion = (short) (isCoordinator ? 0 : -1);
 
         numNodesHint = Short.parseShort(props.getProperty("numNodesHint", "" + numNodes));
         semAllJoined = semJoined;
@@ -336,7 +336,7 @@ public class NeuRonNode extends Thread {
     public final AtomicReference<Exception> failure = new AtomicReference<Exception>();
     public void run() {
         try {
-            run2();
+            run3();
         } catch (PlannedException ex) {
             warn(ex.getMessage());
             failure.set(ex);
@@ -533,7 +533,6 @@ public class NeuRonNode extends Thread {
                     throw ex;
                 } catch (SocketException ex) {
                     warn(ex.getMessage());
-                    return;
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
@@ -574,6 +573,92 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }), 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
+                if (semAllJoined != null) semAllJoined.release();
+            } catch (IOException ex) {
+                throw new RuntimeException(ex);
+            }
+        }
+    }
+    
+    private boolean hasJoined = false;
+    
+    public void run3() {
+        if (isCoordinator) {
+            try {
+                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
+                    public void run() {
+                        log("checkpoint: " + coordNodes.size() + " nodes");
+                        printMembers();
+                        //printGrid();
+                    }
+                }), dumpPeriod, dumpPeriod, TimeUnit.SECONDS);
+                new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
+                        .getLocalHost(), basePort), new CoordReceiver());
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        } else {
+            try {
+                final Receiver receiver = new Receiver();
+                new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, myPort),
+                                            receiver);
+
+                log("server started on " + myCachedAddr + ":" + (basePort + myNid));
+
+                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
+                    public void run() {
+                        if (hasJoined) {
+                            pingAll();
+                        }
+                    }
+                }), 1, probePeriod, TimeUnit.SECONDS);
+
+                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
+                    public void run() {
+                        if (hasJoined) {
+                            /*
+                             * path-finding and rendezvous finding is
+                             * interdependent. the fact that we do the path-finding
+                             * first before the rendezvous servers is arbitrary.
+                             */
+                            Pair<Integer, Integer> p = findPathsForAllNodes();
+                            log(p.first
+                                    + " live nodes, "
+                                    + p.second
+                                    + " avg paths, "
+                                    + nodes.get(myNid).latencies.keySet()
+                                            .size() + " direct paths");
+                            ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ? getAllReachableNodes()
+                                    : getAllRendezvousServers();
+                            broadcastMeasurements(measRecips);
+                            if (scheme != RoutingScheme.SIMPLE) {
+                                broadcastRecommendations();
+                            }
+                        }
+                    }
+                }), 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
+                
+                final InetAddress coordAddr = InetAddress.getByName(coordinatorHost);
+                scheduler.schedule(safeRun(new Runnable() {
+                    private int count = 0;
+                    public void run() {
+                        if (count > NeuRonNode.this.joinRetries) {
+                            warn("exceeded max tries!");
+                            System.exit(0);
+                        } else if (!hasJoined) {
+                            log("sending join to coordinator at "
+                                    + coordinatorHost + ":" + basePort
+                                    + " (try " + count + ")");
+                            Join msg = new Join();
+                            msg.addr = myCachedAddr;
+                            msg.src = myNid; // informs coord of orig id
+                            msg.port = myPort;
+                            sendObject(msg, coordAddr, basePort, (short)-1);
+                            log("waiting for InitMsg");
+                            scheduler.schedule(this, 10, TimeUnit.SECONDS);
+                        }
+                    }
+                }), joinDelay, TimeUnit.SECONDS);
                 if (semAllJoined != null) semAllJoined.release();
             } catch (IOException ex) {
                 throw new RuntimeException(ex);
@@ -650,6 +735,8 @@ public class NeuRonNode extends Thread {
      * coordinator's msg handling loop
      */
     public final class CoordReceiver extends IoHandlerAdapter {
+        public short nodeId = 1;
+        
         @Override
         public void messageReceived(IoSession session, Object obj)
                 throws Exception {
@@ -658,19 +745,51 @@ public class NeuRonNode extends Thread {
                 if (msg == null) return;
                 synchronized (NeuRonNode.this) {
                     if (msg.session == sessionId) {
-                        if (coordNodes.containsKey(msg.src)) {
+                        if (msg instanceof Join && !id2id.values().contains(msg.src)) {
+                            Join join = (Join) msg ;
+                            if (!capJoins || coordNodes.size() < numNodesHint) {
+                                addMember(nodeId++, join.addr, join.port, join.src);
+                                if (blockJoins) {
+                                    if (coordNodes.size() >= numNodesHint) {
+                                        // time to broadcast ims to everyone
+                                        ArrayList<NodeInfo> memberList = getMemberInfos();
+                                        for (NodeInfo m : memberList) {
+                                            Init im = new Init();
+                                            im.id = m.id;
+                                            im.members = memberList;
+                                            sendObject(im, m);
+                                        }
+                                    }
+                                } else {
+                                    Init im = new Init();
+                                    im.id = nodeId;
+                                    im.members = getMemberInfos();
+                                    sendObject(im, join.addr, join.port, (short)-1);
+                                    broadcastMembershipChange(nodeId);
+                                }
+
+                                if (coordNodes.size() == numNodesHint) {
+                                    semAllJoined.release();
+                                }
+                            } else if (capJoins && coordNodes.size() == numNodesHint) {
+                                Init im = new Init();
+                                im.id = -1;
+                                im.members = new ArrayList<NodeInfo>();
+                                sendObject(im, join.addr, join.port, (short)-1);
+                            }
+                        } else if (coordNodes.containsKey(msg.src)) {
                             log("recv." + msg.getClass().getSimpleName(), "from " +
                                     msg.src + " (oid " + id2id.get(msg.src) + ", "
                                     + id2name.get(msg.src) + ")");
                             resetTimeoutAtCoord(msg.src);
                             if (msg.version < currentStateVersion) {
+                                // this includes joins
                                 log("updating stale membership");
                                 sendMembership(msg.src);
-                            }
-                            if (msg instanceof Ping) {
+                            } else if (msg instanceof Ping) {
                                 // ignore the ping
                             } else {
-                                throw new Exception("can't handle that message type");
+                                throw new Exception("can't handle message type here: " + msg.getClass().getName());
                             }
                         } else {
                             if ((!capJoins || coordNodes.size() < numNodesHint) &&
@@ -713,14 +832,26 @@ public class NeuRonNode extends Thread {
      */
     public final class Receiver extends IoHandlerAdapter {
         @Override
+        public void sessionCreated(IoSession session) throws Exception {
+            // TODO Auto-generated method stub
+            super.sessionCreated(session);
+        }
+
+        @Override
+        public void sessionOpened(IoSession session) throws Exception {
+            // TODO Auto-generated method stub
+            super.sessionOpened(session);
+        }
+
+        @Override
         public void messageReceived(IoSession session, Object obj)
                 throws Exception {
             try {
                 Msg msg = deserialize(obj);
                 if (msg == null) return;
                 synchronized (NeuRonNode.this) {
-                    if ((msg.src == 0 || nodes.containsKey(msg.src)) &&
-                            msg.session == sessionId || msg instanceof Ping) {
+                    if ((msg.src == 0 || nodes.containsKey(msg.src) || msg instanceof Ping)
+                            && msg.session == sessionId) {
                         NodeState state = nodes.get(msg.src);
 
                         log("recv." + msg.getClass().getSimpleName(), "from " + msg.src);
@@ -754,16 +885,20 @@ public class NeuRonNode extends Thread {
                         // the same as ours
 
                         if (msg.version > currentStateVersion) {
-                            if (msg instanceof Membership) {
+                            if (msg instanceof Membership && hasJoined) {
                                 currentStateVersion = msg.version;
                                 Membership m = (Membership) msg;
                                 myNid = m.yourId;
                                 updateMembers(m.members);
+                            } else if (msg instanceof Init) {
+                                hasJoined = true;
+                                if (semAllJoined != null)
+                                    semAllJoined.release();
+                                if (((Init) msg).id == -1)
+                                    session.close();
+                                handleInit((Init) msg);
                             } else {
-                                // i am out of date - request latest membership
-                                // sendObject(new MemberPoll(), 0);
-                                // commented out - membership updates now
-                                // implicitly handled via pings
+                                // i am out of date - wait until i am updated
                             }
                         } else if (msg.version == currentStateVersion) {
                             // from coordinator
@@ -778,12 +913,8 @@ public class NeuRonNode extends Thread {
                                 RoutingRecs recs = (RoutingRecs) msg;
                                 handleRecommendations(recs);
                                 log("got recs " + routesToString(recs.recs));
-                            } else if (msg instanceof Ping) {
+                            } else if (msg instanceof Ping || msg instanceof Pong || msg instanceof Init) {
                                 // nothing to do, already handled above
-                            } else if (msg instanceof Pong) {
-                                // nothing to do, already handled above
-                            } else if (msg instanceof Init) {
-                                handleInit((Init) msg);
                             } else {
                                 throw new Exception("can't handle that message type");
                             }
