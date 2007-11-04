@@ -350,236 +350,6 @@ public class NeuRonNode extends Thread {
 
     private short nextNodeId = 1;
 
-    public void run2() {
-        if (isCoordinator) {
-            try {
-                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
-                    public void run() {
-                        log("checkpoint: " + coordNodes.size() + " nodes");
-                        printMembers();
-                        //printGrid();
-                    }
-                }), dumpPeriod, dumpPeriod, TimeUnit.SECONDS);
-                if (membershipBroadcastPeriod > 0) {
-                    scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
-                        public void run() {
-                            if (membersChanged.get()) {
-                                broadcastMembershipChange((short) 0);
-                            }
-                        }
-                    }), 1, membershipBroadcastPeriod, TimeUnit.SECONDS);
-                }
-                // do not remove this for now
-                Thread.sleep(2000);
-                new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
-                        .getLocalHost(), basePort), new CoordReceiver());
-                ServerSocket ss = new ServerSocket(basePort);
-                try {
-                    ss.setReuseAddress(true);
-                    ss.setSoTimeout(1000);
-                    log("Beep!");
-
-                    final Hashtable<Short, Socket> incomingSocks = new Hashtable<Short, Socket>();
-                    while (!doQuit.get()) {
-                        final Socket incoming;
-                        try {
-                            incoming = ss.accept();
-                        } catch (SocketTimeoutException ex) {
-                            continue;
-                        }
-                        final short nodeId;
-                        // this is OK since nid orderings are irrelevant
-                        synchronized (NeuRonNode.this) {
-                            nodeId = nextNodeId++;
-                        }
-
-                        executor.submit(new Runnable() {
-                            public void run() {
-                                try {
-                                    Join msg = (Join) new Serialization().deserialize(new DataInputStream(incoming.getInputStream()));
-
-                                    synchronized (NeuRonNode.this) {
-                                        incomingSocks.put(nodeId, incoming);
-                                        if (!capJoins || coordNodes.size() < numNodesHint) {
-                                            addMember(nodeId, msg.addr, msg.port, msg.src);
-                                            if (blockJoins) {
-                                                if (coordNodes.size() >= numNodesHint) {
-                                                    // time to broadcast ims to everyone
-                                                    ArrayList<NodeInfo> memberList = getMemberInfos();
-                                                    for (NodeInfo m : memberList) {
-                                                        try {
-                                                            doit(incomingSocks,
-                                                                    memberList,
-                                                                    m.id);
-                                                        } finally {
-                                                            incomingSocks.get(m.id).close();
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                doit(incomingSocks, getMemberInfos(), nodeId);
-                                                broadcastMembershipChange(nodeId);
-                                            }
-
-                                            if (coordNodes.size() == numNodesHint) {
-                                                semAllJoined.release();
-                                            }
-                                        } else if (capJoins && coordNodes.size() == numNodesHint) {
-                                            Init im = new Init();
-                                            im.src = myNid;
-                                            im.id = -1;
-                                            im.members = new ArrayList<NodeInfo>();
-                                            sendit(incoming, im);
-                                        }
-                                    }
-                                } catch (Exception ex) {
-                                    err(ex);
-                                } finally {
-                                    try {
-                                        if (!blockJoins) incoming.close();
-                                    } catch (IOException ex) {
-                                        err(ex);
-                                    }
-                                }
-                            }
-
-                            private void doit(
-                                    final Hashtable<Short, Socket> incomingSocks,
-                                    ArrayList<NodeInfo> memberList,
-                                    short nid) throws IOException {
-                                Init im = new Init();
-                                im.id = nid;
-                                im.src = myNid;
-                                im.version = currentStateVersion;
-                                im.members = memberList;
-                                sendit(incomingSocks.get(nid), im);
-                            }
-
-                            private void sendit(
-                                    Socket socket, Init im) throws IOException {
-                                DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-                                new Serialization().serialize(im, dos);
-                                dos.flush();
-                            }
-                        });
-                    }
-                } finally {
-                    ss.close();
-                    log("coord done");
-                }
-            } catch (Exception ex) {
-                throw new RuntimeException(ex);
-            }
-        } else {
-            int count = 0;
-            try {
-                Thread.sleep(1000 * joinDelay);
-            } catch (InterruptedException ex) {
-                throw new RuntimeException(ex);
-            }
-            while (true) {
-                Socket s = null;
-                try {
-                    if (count++ > joinRetries) {
-                        throw new PlannedException("exceeded join try limit; aborting");
-                    }
-                    // connect to the coordinator
-                    try {
-                        s = new Socket(coordinatorHost, basePort);
-                    } catch (Exception ex) {
-                        log("couldn't connect to coord, retrying in 1 sec: " + ex.getMessage());
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException ie) {
-                        }
-                    }
-                    if (s != null) {
-                        try {
-                            // talk to coordinator
-                            log("sending join to coordinator at " + coordinatorHost + ":" + basePort);
-                            Join msg = new Join();
-                            msg.addr = myCachedAddr;
-                            msg.src = myNid; // informs coord of orig id
-                            msg.port = myPort;
-                            DataOutputStream dos = new DataOutputStream(s.getOutputStream());
-                            new Serialization().serialize(msg, dos);
-                            dos.flush();
-
-                            log("waiting for InitMsg");
-                            ByteArrayOutputStream minibaos = new ByteArrayOutputStream();
-                            byte[] minibuf = new byte[8192];
-                            int amt;
-                            while ((amt = s.getInputStream().read(minibuf)) > 0) {
-                                minibaos.write(minibuf, 0, amt);
-                            }
-                            byte[] buf = minibaos.toByteArray();
-                            try {
-                                Init im = (Init) new Serialization().deserialize(new DataInputStream(new ByteArrayInputStream(buf)));
-                                handleInit(im);
-                            } catch (Exception ex) {
-                                err("got buffer: " + bytes2string(buf));
-                                throw ex;
-                            }
-                            break;
-                        } finally {
-                            try {
-                                s.close();
-                            } catch (Exception ex) {
-                                throw new RuntimeException(ex);
-                            }
-                        }
-                    }
-                } catch (PlannedException ex) {
-                    throw ex;
-                } catch (SocketException ex) {
-                    warn(ex.getMessage());
-                } catch (Exception ex) {
-                    throw new RuntimeException(ex);
-                }
-            }
-
-            // wait for coordinator to announce my existence to others
-            try {
-                Thread.sleep(membershipBroadcastPeriod * 1000);
-            } catch (InterruptedException ex) {
-                throw new RuntimeException(ex);
-            }
-
-            // now start accepting pings and other msgs,
-            // also start sending probes and sending out other msgs
-            try {
-                new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, myPort),
-                                            new Receiver());
-                log("server started on " + myCachedAddr + ":" + (basePort + myNid));
-                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
-                    public void run() {
-                        pingAll();
-                    }
-                }), 1, probePeriod, TimeUnit.SECONDS);
-                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
-                    public void run() {
-                        /*
-                         * path-finding and rendezvous finding is
-                         * interdependent. the fact that we do the path-finding
-                         * first before the rendezvous servers is arbitrary.
-                         */
-                        Pair<Integer, Integer> p = findPathsForAllNodes();
-                        log(p.first + " live nodes, " + p.second + " avg paths, " + nodes.get(myNid).latencies.keySet().size() + " direct paths");
-                        ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ?
-                                getAllReachableNodes() : getAllRendezvousServers();
-                        broadcastMeasurements(measRecips);
-                        if (scheme != RoutingScheme.SIMPLE) {
-                            broadcastRecommendations();
-                        }
-                    }
-                }), 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
-                if (semAllJoined != null) semAllJoined.release();
-            } catch (IOException ex) {
-                throw new RuntimeException(ex);
-            }
-        }
-    }
-    
     private boolean hasJoined = false;
     
     public void run3() {
@@ -728,14 +498,21 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private Hashtable<Short,Short> id2id = new Hashtable<Short,Short>();
+    private Hashtable<Short,Short> id2oid = new Hashtable<Short,Short>();
     private Hashtable<Short,String> id2name = new Hashtable<Short,String>();
 
     /**
      * coordinator's msg handling loop
      */
     public final class CoordReceiver extends IoHandlerAdapter {
-        public short nodeId = 1;
+        public short nodeId = 0;
+        
+        private void sendInit(short nid, Join join) {
+            Init im = new Init();
+            im.id = nid;
+            im.members = getMemberInfos();
+            sendObject(im, join.addr, join.port, (short)-1);
+        }
         
         @Override
         public void messageReceived(IoSession session, Object obj)
@@ -745,41 +522,44 @@ public class NeuRonNode extends Thread {
                 if (msg == null) return;
                 synchronized (NeuRonNode.this) {
                     if (msg.session == sessionId) {
-                        if (msg instanceof Join && !id2id.values().contains(msg.src)) {
-                            Join join = (Join) msg ;
-                            if (!capJoins || coordNodes.size() < numNodesHint) {
-                                addMember(nodeId++, join.addr, join.port, join.src);
-                                if (blockJoins) {
-                                    if (coordNodes.size() >= numNodesHint) {
-                                        // time to broadcast ims to everyone
-                                        ArrayList<NodeInfo> memberList = getMemberInfos();
-                                        for (NodeInfo m : memberList) {
-                                            Init im = new Init();
-                                            im.id = m.id;
-                                            im.members = memberList;
-                                            sendObject(im, m);
-                                        }
-                                    }
-                                } else {
-                                    Init im = new Init();
-                                    im.id = nodeId;
-                                    im.members = getMemberInfos();
-                                    sendObject(im, join.addr, join.port, (short)-1);
-                                    broadcastMembershipChange(nodeId);
-                                }
-
-                                if (coordNodes.size() == numNodesHint) {
-                                    semAllJoined.release();
-                                }
-                            } else if (capJoins && coordNodes.size() == numNodesHint) {
-                                Init im = new Init();
-                                im.id = -1;
-                                im.members = new ArrayList<NodeInfo>();
-                                sendObject(im, join.addr, join.port, (short)-1);
+                        if (msg instanceof Join) {
+                            final Join join = (Join) msg ;
+                            if (id2oid.values().contains(msg.src)) {
+                            	// we already added this guy; just resend him the init msg
+                            	sendInit(addr2id.get(join.addr), join);
+                            } else {
+                            	// need to add this guy and send him the init msg (if there's space)
+	                            if (!capJoins || coordNodes.size() < numNodesHint) {
+	                                addMember(++nodeId, join.addr, join.port, join.src);
+	                                if (blockJoins) {
+	                                    if (coordNodes.size() >= numNodesHint) {
+	                                        // time to broadcast ims to everyone
+	                                        ArrayList<NodeInfo> memberList = getMemberInfos();
+	                                        for (NodeInfo m : memberList) {
+	                                            Init im = new Init();
+	                                            im.id = m.id;
+	                                            im.members = memberList;
+	                                            sendObject(im, m);
+	                                        }
+	                                    }
+	                                } else {
+	                                    sendInit(nodeId, join);
+	                                    broadcastMembershipChange(nodeId);
+	                                }
+	
+	                                if (coordNodes.size() == numNodesHint) {
+	                                    semAllJoined.release();
+	                                }
+	                            } else if (capJoins && coordNodes.size() == numNodesHint) {
+	                                Init im = new Init();
+	                                im.id = -1;
+	                                im.members = new ArrayList<NodeInfo>();
+	                                sendObject(im, join.addr, join.port, (short)-1);
+	                            }
                             }
                         } else if (coordNodes.containsKey(msg.src)) {
                             log("recv." + msg.getClass().getSimpleName(), "from " +
-                                    msg.src + " (oid " + id2id.get(msg.src) + ", "
+                                    msg.src + " (oid " + id2oid.get(msg.src) + ", "
                                     + id2name.get(msg.src) + ")");
                             resetTimeoutAtCoord(msg.src);
                             if (msg.version < currentStateVersion) {
@@ -873,9 +653,14 @@ public class NeuRonNode extends Thread {
                                 resetTimeoutAtNode(pong.src);
                                 NodeState self = nodes.get(myNid);
                                 short oldLatency = self.latencies.get(pong.src);
-                                short ewma = (short) (smoothingFactor
-                                        * (rtt / 2) + (1 - smoothingFactor)
-                                        * oldLatency);
+                                final short ewma;
+                                if (oldLatency == resetLatency) {
+                                	ewma = (short) (rtt / 2);
+                                } else {
+                                    ewma = (short) (smoothingFactor
+                                            * (rtt / 2) + (1 - smoothingFactor)
+                                            * oldLatency);
+                                }
                                 log("latency", pong.src + " = " + rtt/2 + ", ewma " + ewma);
                                 self.latencies.put(pong.src, ewma);
                             } else {
@@ -1030,7 +815,7 @@ public class NeuRonNode extends Thread {
         info.addr = addr;
         info.port = port;
         coordNodes.put(newNid, info);
-        id2id.put(newNid, origId);
+        id2oid.put(newNid, origId);
         id2name.put(newNid, addr.getHostName());
         addr2id.put(addr, newNid);
         log("adding new node: " + newNid + " oid " + origId + " name " +
@@ -1081,8 +866,9 @@ public class NeuRonNode extends Thread {
      * @param nid
      */
     private void removeMember(short nid) {
-        log("removing dead node " + nid + " oid " + id2id.get(nid) + " " +
+        log("removing dead node " + nid + " oid " + id2oid.get(nid) + " " +
                 id2name.get(nid));
+        id2oid.remove(nid);
         NodeInfo info = coordNodes.remove(nid);
         Short mid = addr2id.remove(info.addr);
         assert mid != null;
@@ -1393,7 +1179,7 @@ public class NeuRonNode extends Thread {
     private void printMembers() {
         String s = "members:";
         for (NodeInfo info : coordNodes.values()) {
-            s += "\n  " + info.id + " oid " + id2id.get(info.id) + " " +
+            s += "\n  " + info.id + " oid " + id2oid.get(info.id) + " " +
                 id2name.get(info.id) + " " + info.port;
         }
         log(s);
