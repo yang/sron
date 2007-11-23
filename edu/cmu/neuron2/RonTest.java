@@ -49,8 +49,8 @@ public class RonTest {
         try {
             rt.run();
         } catch (PlannedException ex) {
-        } catch (Exception ex) {
-            System.exit(666);
+        //} catch (Exception ex) {
+        //     System.exit(7);
         }
     }
 

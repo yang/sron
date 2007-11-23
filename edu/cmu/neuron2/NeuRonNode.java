@@ -193,7 +193,7 @@ public class NeuRonNode extends Thread {
         myNid = id;
         origNid = id;
         cachedMemberNidsVersion = (short)-1;
-        joinRetries = Integer.parseInt(props.getProperty("joinTimeLimit", "10")); // wait up to 10 secs by default for coord to be available
+        joinRetries = Integer.parseInt(props.getProperty("joinRetries", "10")); // wait up to 10 secs by default for coord to be available
         membershipBroadcastPeriod = Integer.parseInt(props.getProperty("membershipBroadcastPeriod", "0"));
 
         // NOTE note that you'll probably want to set this, always!
@@ -635,8 +635,7 @@ public class NeuRonNode extends Thread {
                         NodeState state = nodes.get(msg.src);
 
                         log("recv." + msg.getClass().getSimpleName(), "from "
-                                + msg.src + " len "
-                                + msg.getClass().getSimpleName());
+                                + msg.src + " len " + ((ByteBuffer) obj).limit());
 
                         // always reply to pings and log pongs
 
