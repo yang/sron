@@ -1443,20 +1443,24 @@ public class NeuRonNode extends Thread {
     }
 
     /**
-     * counts the number of paths to a particular node
+     * counts the number of paths to a particular node.
+     * TODO reset latency
      */
     private int findPaths(NodeState node) {
         ArrayList<NodeState> clients = getAllRendezvousClients();
         ArrayList<NodeState> servers = lastRendezvousServers;
         HashSet<NodeState> options = new HashSet<NodeState>();
+        short min = resetLatency;
         short nid = node.info.id;
+        node.hop = 0;
 
-        node.hop = node.isReachable ? node.info.id : 0;
-        if (node.isReachable)
+        // direct hop
+        if (node.isReachable) {
+            node.hop = node.info.id;
             options.add(node);
+        }
 
         // find best rendezvous client. note that this includes node itself.
-        short min = resetLatency;
         for (NodeState client : clients) {
             short val = client.latencies.get(nid);
             if (val != resetLatency) {
@@ -1472,7 +1476,7 @@ public class NeuRonNode extends Thread {
         // through hopOptions, because that doesn't tell us which server to go
         // through.)
         for (NodeState server : servers) {
-            if (server.dstsPresent.contains(min)) {
+            if (server.dstsPresent.contains(nid)) {
                 options.add(server);
                 if (node.hop == 0)
                     node.hop = server.info.id;
