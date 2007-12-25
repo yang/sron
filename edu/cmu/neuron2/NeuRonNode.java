@@ -210,11 +210,11 @@ public class NeuRonNode extends Thread {
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
-        if (mode == RunMode.SIM) {
-            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "60"));
-        } else {
+        //if (mode == RunMode.SIM) {
+            //probePeriod = Integer.parseInt(props.getProperty("probePeriod", "60"));
+        //} else {
             probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
-        }
+        //}
         membershipTimeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         linkTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + membershipTimeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
@@ -347,8 +347,6 @@ public class NeuRonNode extends Thread {
             if (semAllJoined != null) semAllJoined.release();
         }
     }
-
-    private short nextNodeId = 1;
 
     private boolean hasJoined = false;
     
@@ -505,8 +503,31 @@ public class NeuRonNode extends Thread {
      * coordinator's msg handling loop
      */
     public final class CoordReceiver extends IoHandlerAdapter {
-        public short nodeId = 0;
-        
+        /**
+         * Generates non-repeating random sequence of short IDs, and keeps
+         * track of how many are emitted.
+         */
+        public final class IdGenerator {
+            private final Iterator<Short> iter;
+            private short counter;
+            public IdGenerator() {
+                List<Short> list = new ArrayList<Short>();
+                for (short s = 1; s < Short.MAX_VALUE; s++) {
+                    list.add(s);
+                }
+                Collections.shuffle(list);
+                iter = list.iterator();
+            }
+            public short next() {
+                counter++;
+                return iter.next();
+            }
+            public short count() {
+                return counter;
+            }
+        }
+        private IdGenerator nidGen = new IdGenerator();
+
         private void sendInit(short nid, Join join) {
             Init im = new Init();
             im.id = nid;
@@ -530,7 +551,7 @@ public class NeuRonNode extends Thread {
                             } else {
                             	// need to add this guy and send him the init msg (if there's space)
 	                            if (!capJoins || coordNodes.size() < numNodesHint) {
-	                                addMember(++nodeId, join.addr, join.port, join.src);
+	                                addMember(nidGen.next(), join.addr, join.port, join.src);
 	                                if (blockJoins) {
 	                                    if (coordNodes.size() >= numNodesHint) {
 	                                        // time to broadcast ims to everyone
@@ -543,8 +564,8 @@ public class NeuRonNode extends Thread {
 	                                        }
 	                                    }
 	                                } else {
-	                                    sendInit(nodeId, join);
-	                                    broadcastMembershipChange(nodeId);
+	                                    sendInit(nidGen.count(), join);
+	                                    broadcastMembershipChange(nidGen.count());
 	                                }
 	
 	                                if (coordNodes.size() == numNodesHint) {
@@ -581,7 +602,7 @@ public class NeuRonNode extends Thread {
                                 Short mappedId = addr2id.get(ping.info.addr);
                                 short nid;
                                 if (mappedId == null) {
-                                    nid = nextNodeId++;
+                                    nid = nidGen.next();
                                     addMember(nid, ping.info.addr,
                                             ping.info.port, ping.info.id);
                                     broadcastMembershipChange(nid);
@@ -954,6 +975,8 @@ public class NeuRonNode extends Thread {
          * broadcast to us. this is a non-issue because we ignore stale
          * messages, and when they do become updated, they'll forget about us
          * too.
+         *
+         * this should correctly handle nodes that reappear in the grid.
          */
         rendezvousClients.clear();
         defaultRendezvousServers.clear();
@@ -1066,6 +1089,8 @@ public class NeuRonNode extends Thread {
      * @return the union of all the sets of non-failed rendezvous servers.
      */
     private ArrayList<NodeState> getAllRendezvousServers() {
+        // these are the rendezvous servers that we want to sent our
+        // measurements to
         HashSet<NodeState> servers = new HashSet<NodeState>();
         NodeState self = nodes.get(myNid);
         for (int r0 = 0; r0 < numRows; r0++) {
@@ -1073,30 +1098,48 @@ public class NeuRonNode extends Thread {
                 NodeState dst = grid[r0][c0];
 
                 // if dst is not us and we believe that the node is not down
-                if (dst != self && dst.hop != 0) {
+                if (dst != self && dst.hop != 0 &&
+                        !(dst.info.id == grid[0][0].info.id && r0 != 0 && c0 != 0)) {
+                    // this is our current (active) set of rendezvous servers
                     HashSet<NodeState> rs = rendezvousServers.get(dst.info.id);
 
                     // check if any of our default rendezvous servers are once
                     // more available; if so, add them back
                     HashSet<NodeState> defaults = defaultRendezvousServers.get(dst.info.id);
 
+                    // we always want to try talking to our default rendezvous
+                    // servers if we think they're reachable
                     for (NodeState r : defaults)
                         if (r.isReachable)
                             servers.add(r);
 
+                    // are any of the default rendezvous servers in our current
+                    // set?
                     boolean hasDefaults = false;
                     for (NodeState r : defaults) {
                         hasDefaults = rs.contains(r);
                         break;
                     }
 
+                    // TODO the wait-extra-round-before-failover invariant is
+                    // not being upheld because we may encounter the same node
+                    // twice in the outer loop
+
+                    // the following code attempts to add default rendezvous
+                    // servers back into rs
                     HashSet<NodeState> old = new HashSet<NodeState>(rs);
                     if (hasDefaults) {
+                        // if any default rendezvous servers are in use, then
+                        // don't clear rs; simply add any more default servers
+                        // that are working
                         if (!defaults.equals(rs))
                             for (NodeState r : defaults)
                                 if (!isFailedRendezvous(r, dst))
                                     rs.add(r);
                     } else {
+                        // if no default rendezvous servers are in use, then
+                        // try adding any that are working; if any are working,
+                        // we make sure to first clear rs
                         boolean cleared = false;
                         for (NodeState r : defaults) {
                             if (!isFailedRendezvous(r, dst)) {
@@ -1118,7 +1161,7 @@ public class NeuRonNode extends Thread {
                         // look for failovers
 
                         // get candidates from col
-                        ArrayList<NodeState> cands = new ArrayList<NodeState>();
+                        HashSet<NodeState> cands = new HashSet<NodeState>();
                         for (int r1 = 0; r1 < numRows; r1++) {
                             NodeState cand = grid[r1][c0];
                             if (cand != self && cand.isReachable)
@@ -1133,7 +1176,8 @@ public class NeuRonNode extends Thread {
                         }
 
                         // choose candidate uniformly at random
-                        NodeState failover = cands.get(rand.nextInt(cands.size()));
+                        ArrayList<NodeState> candsList = new ArrayList<NodeState>(cands);
+                        NodeState failover = candsList.get(rand.nextInt(candsList.size()));
                         log("new failover for " + dst + ": " + failover + ", prev rs = " + rs);
                         rs.add(failover);
                         servers.add(failover);
@@ -1146,6 +1190,10 @@ public class NeuRonNode extends Thread {
                          * for failovers. the next period, we will have
                          * received link states from our neighbors, from
                          * which we can determine whether dst is just down.
+                         *
+                         * the reason for this is that if a node fails, we
+                         * don't want the entire network to flood the row/col
+                         * of that downed node (no need for failovers period)
                          */
                         for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
                             NodeState r = i.next();
