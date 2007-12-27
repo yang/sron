@@ -1094,9 +1094,79 @@ public class NeuRonNode extends Thread {
      * result, measurements are broadcast to everyone, as intended. (note that
      * there are no routing recommendation messages in this scheme.)
      *
+     * OLD ALGO
+     *
+     * for dst
+     *   if dst is not down
+     *     rs = dst's current rendezvous servers
+     *     ds = dst's default rendezvous servers
+     *     if any of ds are working to dst and rs is not ds
+     *       rs = working subset of ds
+     *     if rs = []
+     *       rs += random node from dst's row/col
+     *     else
+     *       rs -= any failed rs
+     *       note that this may leave rs empty for the coming round
+     *       this is what we want bc it will delay failover-finding till the next round
+     *
+     * NEW ALGO
+     *
+     * // CHANGES START
+     * build a rowmap (row -&rt; set(rendezvous)) and colmap
+     * call these F
+     * // CHANGES END
+     * for dst
+     *   if dst is not down
+     *     rs = dst's current rendezvous servers
+     *     ds = dst's default rendezvous servers
+     *     if any of ds are working to dst and rs is not ds
+     *       rs = working subset of ds
+     *     if rs = []
+     *       // CHANGES START
+     *       for active failover in dst's row/col (according to F)
+     *         if failover works to dst, choose it as failover for dst as well
+     *       choose rand node from dst's row/col that is not currently in use
+     *       rs += whatever we chose; F += whatever we chose
+     *       // CHANGES END
+     *     else
+     *       rs -= any failed rs
+     *       note that this may leave rs empty for the coming round
+     *       this is what we want bc it will delay failover-finding till the next round
+     *
      * @return the union of all the sets of non-failed rendezvous servers.
      */
     private ArrayList<NodeState> getAllRendezvousServers() {
+
+        // first, prepare the rowmap and colmap so that we can share/reuse
+        // rendezvous servers
+
+        Hashtable<Integer, HashSet<NodeState>> colmap = new Hashtable<Integer, HashSet<NodeState>>();
+        Hashtable<Integer, HashSet<NodeState>> rowmap = new Hashtable<Integer, HashSet<NodeState>>();
+        HashSet<NodeState> allDefaults = new HashSet<NodeState>();
+
+        for (HashSet<NodeState> d : defaultRendezvousServers.values()) {
+            allDefaults.addAll(d);
+        }
+
+        for (int r = 0; r < numRows; r++) {
+            rowmap.put(r, new HashSet<NodeState>());
+        }
+        for (int c = 0; c < numCols; c++) {
+            colmap.put(c, new HashSet<NodeState>());
+        }
+
+        for (int r = 0; r < numRows; r++) {
+            for (int c = 0; c < numCols; c++) {
+                for (NodeState n : rendezvousServers.get(grid[r][c].info.id)) {
+                    // if this is an actual failover
+                    if (!allDefaults.contains(n)) {
+                        rowmap.get(r).add(n);
+                        colmap.get(c).add(n);
+                    }
+                }
+            }
+        }
+
         // these are the rendezvous servers that we want to sent our
         // measurements to
         HashSet<NodeState> servers = new HashSet<NodeState>();
