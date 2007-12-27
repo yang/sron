@@ -111,6 +111,7 @@ public class NeuRonNode extends Thread {
 
     public final int neighborBroadcastPeriod;
     public final int probePeriod;
+    public final int gcPeriod;
 
     private final NodeInfo coordNode;
     private final DatagramSocket sendSocket;
@@ -208,6 +209,7 @@ public class NeuRonNode extends Thread {
         basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
+        gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
         //if (mode == RunMode.SIM) {
@@ -405,7 +407,13 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }), 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
-                
+
+                scheduler.scheduleAtFixedRate(new Runnable() {
+                    public void run() {
+                        System.gc();
+                    }
+                }, 1, gcPeriod, TimeUnit.SECONDS);
+
                 final InetAddress coordAddr = InetAddress.getByName(coordinatorHost);
                 scheduler.schedule(safeRun(new Runnable() {
                     private int count = 0;
@@ -1120,10 +1128,6 @@ public class NeuRonNode extends Thread {
                         hasDefaults = rs.contains(r);
                         break;
                     }
-
-                    // TODO the wait-extra-round-before-failover invariant is
-                    // not being upheld because we may encounter the same node
-                    // twice in the outer loop
 
                     // the following code attempts to add default rendezvous
                     // servers back into rs
