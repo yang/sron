@@ -44,7 +44,7 @@ when 'failures'
   end
 when 'nofailures'
   failure_rate_range = [0]
-  num_nodes_range = [10, 20, 30, 40]
+  num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200]
   num_runs = 1
   schemes = ["simple", "sqrt"]
 end
@@ -104,7 +104,7 @@ end
 
 # aggregate xs and append to out file
 def append_agg(xs, out, param)
-  avg_size = xs.inject{|x,y| x+y} / xs.size.to_f
+  avg_size = xs.inject{|x,y| x+y}.to_f / xs.size.to_f
   out.puts "#{param} #{avg_size}"
 end
 
@@ -126,7 +126,7 @@ when 'run'
             extra_args = "-DsimData=#{subdir}/failures.dat"
           else
             extra_args = ''
-            total_time = 120
+            total_time = 300
           end
 
           # run for all configs with the same failure data set.
@@ -147,7 +147,7 @@ when 'agg'
       File.open("#{datadir}/bandwidth-#{scheme}-nofailures.dat", 'a') do |out|
         for num_nodes in num_nodes_range
           xs = []
-          agg_runs(scheme, num_nodes, failure_rate, xs)
+          agg_runs(scheme, num_nodes, 0, xs)
           append_agg(xs,out,num_nodes)
         end
       end
