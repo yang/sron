@@ -1234,19 +1234,40 @@ public class NeuRonNode extends Thread {
                     if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
                         // look for failovers
 
-                        // get candidates from col
                         HashSet<NodeState> cands = new HashSet<NodeState>();
-                        for (int r1 = 0; r1 < numRows; r1++) {
-                            NodeState cand = grid[r1][c0];
-                            if (cand != self && cand.isReachable)
-                                cands.add(cand);
+
+                        // first, start by looking at the failovers that are
+                        // currently in use for this col/row, so that we can
+                        // share when possible
+
+                        HashSet<NodeState> colrowFailovers = new HashSet<NodeState>();
+                        colrowFailovers.addAll(rowmap.get(r0));
+                        colrowFailovers.addAll(colmap.get(c0));
+                        for (NodeState f : colrowFailovers) {
+                            if (!isFailedRendezvous(f, dst)) {
+                                cands.add(f);
+                            }
                         }
 
-                        // get candidates from row
-                        for (int c1 = 0; c1 < numCols; c1++) {
-                            NodeState cand = grid[r0][c1];
-                            if (cand != self && cand.isReachable)
-                                cands.add(cand);
+                        if (cands.isEmpty()) {
+
+                            // only once we have determined that no current
+                            // failover works for us do we go ahead and randomly
+                            // select a new failover
+
+                            // get candidates from col
+                            for (int r1 = 0; r1 < numRows; r1++) {
+                                NodeState cand = grid[r1][c0];
+                                if (cand != self && cand.isReachable)
+                                    cands.add(cand);
+                            }
+
+                            // get candidates from row
+                            for (int c1 = 0; c1 < numCols; c1++) {
+                                NodeState cand = grid[r0][c1];
+                                if (cand != self && cand.isReachable)
+                                    cands.add(cand);
+                            }
                         }
 
                         // choose candidate uniformly at random
