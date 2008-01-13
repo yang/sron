@@ -287,7 +287,7 @@ public class NeuRonNode extends Thread {
         logger = Logger.getLogger("node_" + myNid);
         logger.addHandler(fh);
         currentStateVersion = im.version;
-        log("got from coord => Init " + im.id);
+        log("got from coord => Init version " + im.version);
         updateMembers(im.members);
     }
 
@@ -559,7 +559,8 @@ public class NeuRonNode extends Thread {
                             } else {
                             	// need to add this guy and send him the init msg (if there's space)
 	                            if (!capJoins || coordNodes.size() < numNodesHint) {
-	                                addMember(nidGen.next(), join.addr, join.port, join.src);
+                                    short newNid = nidGen.next();
+	                                addMember(newNid, join.addr, join.port, join.src);
 	                                if (blockJoins) {
 	                                    if (coordNodes.size() >= numNodesHint) {
 	                                        // time to broadcast ims to everyone
@@ -572,8 +573,8 @@ public class NeuRonNode extends Thread {
 	                                        }
 	                                    }
 	                                } else {
-	                                    sendInit(nidGen.count(), join);
-	                                    broadcastMembershipChange(nidGen.count());
+	                                    sendInit(newNid, join);
+	                                    broadcastMembershipChange(newNid);
 	                                }
 	
 	                                if (coordNodes.size() == numNodesHint) {
@@ -703,7 +704,7 @@ public class NeuRonNode extends Thread {
                             if (msg instanceof Membership && hasJoined) {
                                 currentStateVersion = msg.version;
                                 Membership m = (Membership) msg;
-                                myNid = m.yourId;
+                                assert myNid == m.yourId;
                                 updateMembers(m.members);
                             } else if (msg instanceof Init) {
                                 hasJoined = true;
@@ -719,7 +720,7 @@ public class NeuRonNode extends Thread {
                             // from coordinator
                             if (msg instanceof Membership) {
                                 Membership m = (Membership) msg;
-                                myNid = m.yourId;
+                                assert myNid == m.yourId;
                                 updateMembers(m.members);
                             } else if (msg instanceof Measurements) {
                                 resetTimeoutOnRendezvousClient(msg.src);
@@ -956,6 +957,7 @@ public class NeuRonNode extends Thread {
         //
 
         NodeState self = nodes.get(myNid);
+        assert self != null;
 
         memberNids.clear();
         memberNids.addAll(newNids);
@@ -1488,7 +1490,10 @@ public class NeuRonNode extends Thread {
 
     private int sendObject(final Msg o, short nid) {
         return nid != myNid ?
-            sendObject(o, nid == 0 ? coordNode : nodes.get(nid).info, nid) : 0;
+            sendObject(o,
+                    nid == 0 ? coordNode : (myNid == 0 ?
+                        coordNodes.get(nid) : nodes.get(nid).info),
+                    nid) : 0;
     }
 
     private void broadcastMeasurements(ArrayList<NodeState> servers) {
