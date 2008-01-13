@@ -1071,11 +1071,6 @@ public class NeuRonNode extends Thread {
      * @return
      */
     private boolean isFailedRendezvous(NodeState n, NodeState remote) {
-        ///XXX
-        if (myNid == 1 && n.info.id == 7 && remote.info.id == 8)
-            System.out.println("old remote failures " + n.remoteFailures
-                    + ", failed = "
-                    + (!n.isReachable || n.remoteFailures.contains(remote)));
         return !n.isReachable || n.remoteFailures.contains(remote);
     }
 
@@ -1086,6 +1081,14 @@ public class NeuRonNode extends Thread {
         ArrayList<NodeState> list = new ArrayList<NodeState>(rendezvousClients);
         Collections.sort(list);
         return list;
+    }
+
+    private String mkString(HashSet<NodeState> ns, String glue) {
+        String s = "";
+        for (NodeState n : ns) {
+            s += n.info.id + glue;
+        }
+        return s;
     }
 
     /**
@@ -1234,6 +1237,14 @@ public class NeuRonNode extends Thread {
                     }
 
                     if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
+                        // create
+                        String s = "defaults";
+                        for (NodeState r : defaults) {
+                            s += " " + r.info.id + (
+                                    !r.isReachable ? " unreachable" :
+                                    " <-/-> " + mkString(r.remoteFailures, ",") );
+                        }
+
                         // look for failovers
 
                         HashSet<NodeState> cands = new HashSet<NodeState>();
@@ -1274,17 +1285,18 @@ public class NeuRonNode extends Thread {
 
                         // choose candidate uniformly at random
                         ArrayList<NodeState> candsList = new ArrayList<NodeState>(cands);
-                        NodeState failover = candsList.get(rand.nextInt(candsList.size()));
-                        log("new failover for " + dst + ": " + failover + ", prev rs = " + rs);
-                        rs.add(failover);
-                        servers.add(failover);
-                        if (!allDefaults.contains(failover)) {
-                            rowmap.get(r0).add(failover);
-                            colmap.get(c0).add(failover);
+                        if (candsList.size() == 0) {
+                            log("no failover candidates! giving up");
+                        } else {
+                            NodeState failover = candsList.get(rand.nextInt(candsList.size()));
+                            log("new failover for " + dst + ": " + failover + ", prev rs = " + rs);
+                            rs.add(failover);
+                            servers.add(failover);
+                            if (!allDefaults.contains(failover)) {
+                                rowmap.get(r0).add(failover);
+                                colmap.get(c0).add(failover);
+                            }
                         }
-
-                        ///XXX
-                        System.out.println("FAILOVER " + failover);
                     } else {
                         /*
                          * when we remove nodes now, don't immediately look
