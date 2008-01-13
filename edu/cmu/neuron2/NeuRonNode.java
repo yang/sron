@@ -1278,6 +1278,8 @@ public class NeuRonNode extends Thread {
                         log("new failover for " + dst + ": " + failover + ", prev rs = " + rs);
                         rs.add(failover);
                         servers.add(failover);
+                        rowmap.get(r0).add(failover);
+                        colmap.get(c0).add(failover);
 
                         ///XXX
                         System.out.println("FAILOVER " + failover);
