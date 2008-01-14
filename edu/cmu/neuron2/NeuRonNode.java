@@ -350,18 +350,41 @@ public class NeuRonNode extends Thread {
         }
     }
 
+    /**
+     * Similar to fixed-rate scheduling, but doesn't try to make up multiple
+     * overdue items, but rather allows us to skip over them. This should deal
+     * better with PLab's overloaded hosts.
+     *
+     * @param r The runnable task.
+     * @param initialDelay The initial delay in seconds.
+     * @param period The period in seconds.
+     */
+    private ScheduledFuture<?> safeSchedule(final Runnable r, long initialDelay, final long period) {
+        final long bufferTime = 1000; // TODO parameterize
+        return scheduler.schedule(new Runnable() {
+            private long scheduledTime = -1;
+            public void run() {
+                if (scheduledTime < 0) scheduledTime = System.currentTimeMillis();
+                r.run();
+                long now = System.currentTimeMillis();
+                scheduledTime = Math.max(scheduledTime + period * 1000, now + bufferTime);
+                scheduler.schedule(this, scheduledTime - now, TimeUnit.MILLISECONDS);
+            }
+        }, initialDelay, TimeUnit.SECONDS);
+    }
+
     private boolean hasJoined = false;
     
     public void run3() {
         if (isCoordinator) {
             try {
-                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
+                safeSchedule(safeRun(new Runnable() {
                     public void run() {
                         log("checkpoint: " + coordNodes.size() + " nodes");
                         printMembers();
                         //printGrid();
                     }
-                }), dumpPeriod, dumpPeriod, TimeUnit.SECONDS);
+                }), dumpPeriod, dumpPeriod);
                 new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
                         .getLocalHost(), basePort), new CoordReceiver());
             } catch (Exception ex) {
@@ -375,15 +398,15 @@ public class NeuRonNode extends Thread {
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
-                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
+                safeSchedule(safeRun(new Runnable() {
                     public void run() {
                         if (hasJoined) {
                             pingAll();
                         }
                     }
-                }), 1, probePeriod, TimeUnit.SECONDS);
+                }), 1, probePeriod);
 
-                scheduler.scheduleAtFixedRate(safeRun(new Runnable() {
+                safeSchedule(safeRun(new Runnable() {
                     public void run() {
                         if (hasJoined) {
                             /*
@@ -406,13 +429,13 @@ public class NeuRonNode extends Thread {
                             }
                         }
                     }
-                }), 1, neighborBroadcastPeriod, TimeUnit.SECONDS);
+                }), 1, neighborBroadcastPeriod);
 
-                scheduler.scheduleAtFixedRate(new Runnable() {
+                safeSchedule(new Runnable() {
                     public void run() {
                         System.gc();
                     }
-                }, 1, gcPeriod, TimeUnit.SECONDS);
+                }, 1, gcPeriod);
 
                 final InetAddress coordAddr = InetAddress.getByName(coordinatorHost);
                 scheduler.schedule(safeRun(new Runnable() {
