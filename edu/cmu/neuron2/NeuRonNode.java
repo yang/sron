@@ -285,7 +285,9 @@ public class NeuRonNode extends Thread {
         System.out.println("Had nodeId = " + myNid + ". New nodeId = " + im.id);
         myNid = im.id;
         logger = Logger.getLogger("node_" + myNid);
-        logger.addHandler(fh);
+        if (logger.getHandlers().length == 0) {
+            logger.addHandler(fh);
+        }
         currentStateVersion = im.version;
         log("got from coord => Init version " + im.version);
         updateMembers(im.members);
