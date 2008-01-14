@@ -1244,6 +1244,7 @@ public class NeuRonNode extends Thread {
                                     !r.isReachable ? " unreachable" :
                                     " <-/-> " + mkString(r.remoteFailures, ",") );
                         }
+                        final String report = s;
 
                         // look for failovers
 
@@ -1286,10 +1287,10 @@ public class NeuRonNode extends Thread {
                         // choose candidate uniformly at random
                         ArrayList<NodeState> candsList = new ArrayList<NodeState>(cands);
                         if (candsList.size() == 0) {
-                            log("no failover candidates! giving up");
+                            log("no failover candidates! giving up; " + report);
                         } else {
                             NodeState failover = candsList.get(rand.nextInt(candsList.size()));
-                            log("new failover for " + dst + ": " + failover + ", prev rs = " + rs);
+                            log("new failover for " + dst + ": " + failover + ", prev rs = " + rs + "; " + report);
                             rs.add(failover);
                             servers.add(failover);
                             if (!allDefaults.contains(failover)) {
