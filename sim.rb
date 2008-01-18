@@ -44,7 +44,7 @@ when 'failures'
   end
 when 'nofailures'
   failure_rate_range = [0]
-  num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200]
+  num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160]
   num_runs = 1
   schemes = ["simple", "sqrt"]
 end
@@ -130,7 +130,7 @@ when 'run'
           end
 
           # run for all configs with the same failure data set.
-          sys("./run.bash -DtotalTime=#{total_time} -DconsoleLogFilter=all" +
+          sys("./run.bash -DenableSubpings=false -DtotalTime=#{total_time} -DconsoleLogFilter=all" +
               " -DnumNodes=#{num_nodes} -Dscheme=#{scheme}" +
               " -DprobePeriod=10 -DneighborBroadcastPeriod=30" +
               " #{extra_args}" +
@@ -385,7 +385,7 @@ when 'plot'
     for gtype in ["monochrome", "color"]
       plots = []
       for scheme in schemes
-        plots << "'#{datadir}/#{scheme}.dat' using 1:2 with linespoints title '#{scheme}'"
+        plots << "'#{datadir}/bandwidth-#{scheme}-nofailures.dat' using 1:2 with linespoints title '#{scheme}'"
       end
       plots = plots.join(', ')
 
@@ -410,7 +410,7 @@ when 'plot'
     case cmd[2]
     when 'bandwidth'
       for num_nodes in [50]
-        for gtype in ["monochrome", "color"]
+          for gtype in ["monochrome", "color"]
           plots = []
           for scheme in schemes
             puts "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme}'"
