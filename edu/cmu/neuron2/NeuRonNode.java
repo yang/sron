@@ -129,6 +129,7 @@ public class NeuRonNode extends Thread {
     private final boolean capJoins;
     private final int joinRetries; // seconds
 
+    private final boolean enableSubpings;
     private final int subpingPeriod; // seconds
 
     private final int dumpPeriod;
@@ -213,6 +214,7 @@ public class NeuRonNode extends Thread {
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
         subpingPeriod = Integer.parseInt(props.getProperty("subpingPeriod", "10"));
+        enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
         //if (mode == RunMode.SIM) {
@@ -436,12 +438,14 @@ public class NeuRonNode extends Thread {
                     }
                 }), 1, neighborBroadcastPeriod);
 
-                safeSchedule(safeRun(new Runnable() {
-                    public void run() {
-                        subping();
-                    }
-                }), 5, subpingPeriod);
-                // TODO should these initial offsets be constants?
+                if (enableSubpings) {
+                    safeSchedule(safeRun(new Runnable() {
+                            public void run() {
+                                subping();
+                            }
+                        }), 5, subpingPeriod);
+                    // TODO should these initial offsets be constants?
+                }
 
                 safeSchedule(new Runnable() {
                     public void run() {
