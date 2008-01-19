@@ -167,7 +167,7 @@ public class NeuRonNode extends Thread {
                     synchronized (NeuRonNode.this) {
                         r.run();
                     }
-                } catch (Exception ex) {
+                } catch (Throwable ex) {
                     err(ex);
                 }
             }
