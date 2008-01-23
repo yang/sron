@@ -1794,7 +1794,7 @@ public class NeuRonNode extends Thread {
         // there was a change in the node's up/down status.
         boolean isDead = node.hop == 0;
         boolean cameUp = !isDead && wasDead, wentDown = isDead && !wasDead;
-        if (!batch || cameUp || wentDown) {
+        if (batch || cameUp || wentDown) {
             String specialUpdate = cameUp ? " up" : (wentDown ? " down" : "");
             log("node " + node + specialUpdate + " hop " + node.hop + " total "
                     + options.size());
