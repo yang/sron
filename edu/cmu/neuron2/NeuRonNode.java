@@ -1342,6 +1342,7 @@ public class NeuRonNode extends Thread {
                         // look for failovers
 
                         HashSet<NodeState> cands = new HashSet<NodeState>();
+                        HashSet<NodeState> candsInServers = new HashSet<NodeState>();
 
                         // first, start by looking at the failovers that are
                         // currently in use for this col/row, so that we can
@@ -1354,8 +1355,19 @@ public class NeuRonNode extends Thread {
                         for (NodeState f : colrowFailovers) {
                             if (!isFailedRendezvous(f, dst)) {
                                 cands.add(f);
+
+				if(servers.contains(f))
+				    candsInServers.add(f);
                             }
                         }
+
+			// if any of the candidates are already selected to be in
+			// 'servers', we want to make sure that we only choose from
+			// these choices.
+			if(!candsInServers.isEmpty()) {
+			    cands.clear();
+			    cands.addAll(candsInServers);
+			}
 
                         if (cands.isEmpty()) {
 
