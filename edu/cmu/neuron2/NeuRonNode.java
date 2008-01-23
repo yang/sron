@@ -142,7 +142,7 @@ public class NeuRonNode extends Thread {
 
     private final int membershipBroadcastPeriod;
 
-    private static final String defaultLabelSet = "send.Ping recv.Ping stale.Ping send.Pong recv.Pong stale.Pong send.Measurements send.RoutingRecs";
+    private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping send.Pong recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
 
     private final Hashtable<Short,Long> lastSentMbr = new Hashtable<Short,Long>();
 
@@ -228,6 +228,16 @@ public class NeuRonNode extends Thread {
 
         smoothingFactor = Double.parseDouble(props.getProperty("smoothingFactor", "0.9"));
 
+        Formatter minfmt = new Formatter() {
+            public String format(LogRecord record) {
+                StringBuilder buf = new StringBuilder();
+                buf.append(record.getMillis()).append(' ')/*.append(new Date(record.getMillis())).append(" ").append(
+                        record.getLevel()).append(" ")*/.append(
+                        record.getLoggerName()).append(": ").append(
+                        record.getMessage()).append("\n");
+                return buf.toString();
+            }
+        };
         Formatter fmt = new Formatter() {
             public String format(LogRecord record) {
                 StringBuilder buf = new StringBuilder();
@@ -319,7 +329,7 @@ public class NeuRonNode extends Thread {
         logger.severe(msg);
     }
 
-    private void err(Exception ex) {
+    private void err(Throwable ex) {
         StringWriter s = new StringWriter();
         PrintWriter p = new PrintWriter(s);
         ex.printStackTrace(p);
@@ -517,34 +527,44 @@ public class NeuRonNode extends Thread {
     }
 
     private void subping() {
-        log("subpinging");
-        long time = System.currentTimeMillis();
-        for (short nid : nodes.keySet()) {
-            short hop = nodes.get(nid).hop;
+        Set<Map.Entry<Short,NodeState>> entries = nodes.entrySet();
+        List<Short> nids = new ArrayList<Short>();
+        int bytes = 0;
+        for (Map.Entry<Short,NodeState> entry : entries) {
+            short nid = entry.getKey();
+            short hop = entry.getValue().hop;
+            long time = System.currentTimeMillis();
             if (nid != myNid && hop != 0) {
-                sendObject(subprobe(nid, time, SUBPING), hop);
+                bytes += sendObject(subprobe(nid, time, SUBPING), hop);
+                nids.add(nid);
             }
         }
+        log("sent subpings " + bytes + " bytes, to " + nids);
     }
 
     private void handleSubping(Subprobe p) {
-        if (p.nid == myNid)
+        if (p.nid == myNid) {
             sendObject(subprobe(p.nid, p.time, SUBPONG_FWD), p.src);
-        else
+            log("subprobe", "direct subpong from/to " + p.src);
+        } else {
             sendObject(subprobe(p.src, p.time, SUBPING_FWD), p.nid);
+            log("subprobe", "subping fwd from " + p.src + " to " + p.nid);
+        }
     }
 
     private void handleSubpingFwd(Subprobe p) {
         sendObject(subprobe(p.nid, p.time, SUBPONG), p.src);
+        log("subprobe", "subpong to " + p.nid + " via " + p.src);
     }
 
     private void handleSubpong(Subprobe p) {
         sendObject(subprobe(p.src, p.time, SUBPONG_FWD), p.nid);
+        log("subprobe", "subpong fwd from " + p.src + " to " + p.nid);
     }
 
     private void handleSubpongFwd(Subprobe p) {
         long rtt = System.currentTimeMillis() - p.time;
-        log("subprobe " + p.nid + " via " + p.src + ": " + rtt);
+        log("subpong from " + p.nid + " via " + p.src + ": " + rtt);
     }
 
     private void pingAll() {
@@ -757,24 +777,30 @@ public class NeuRonNode extends Thread {
                             sendObject(pong, ping.info);
                         } else if (msg instanceof Pong) {
                             Pong pong = (Pong) msg;
-                            short rtt = (short) (System.currentTimeMillis() - pong.time);
-
-                            if (state != null) {
-                                resetTimeoutAtNode(pong.src);
-                                NodeState self = nodes.get(myNid);
-                                short oldLatency = self.latencies.get(pong.src);
-                                final short ewma;
-                                if (oldLatency == resetLatency) {
-                                	ewma = (short) (rtt / 2);
+                            long rawRtt = System.currentTimeMillis() - pong.time;
+                            // if the rtt was astronomical, just treat it as a dropped packet
+                            if (rawRtt / 2 < Short.MAX_VALUE) {
+                                // we define "latency" as rtt/2; this should be
+                                // a bigger point near the top of this file
+                                short latency = (short) (rawRtt / 2);
+                                if (state != null) {
+                                    resetTimeoutAtNode(pong.src);
+                                    NodeState self = nodes.get(myNid);
+                                    short oldLatency = self.latencies.get(pong.src);
+                                    final short ewma;
+                                    if (oldLatency == resetLatency) {
+                                        ewma = latency;
+                                    } else {
+                                        ewma = (short) (smoothingFactor * latency +
+                                                (1 - smoothingFactor) * oldLatency);
+                                    }
+                                    log("latency", pong.src + " = " + latency +
+                                            ", ewma " + ewma + ", time " +
+                                            pong.time);
+                                    self.latencies.put(pong.src, ewma);
                                 } else {
-                                    ewma = (short) (smoothingFactor
-                                            * (rtt / 2) + (1 - smoothingFactor)
-                                            * oldLatency);
+                                    log("latency", "some " + pong.src + " = " + latency);
                                 }
-                                log("latency", pong.src + " = " + rtt/2 + ", ewma " + ewma);
-                                self.latencies.put(pong.src, ewma);
-                            } else {
-                                log("latency", "some " + pong.src + " = " + rtt/2);
                             }
                         } else if (msg instanceof Subprobe) {
                             Subprobe p = (Subprobe) msg;
@@ -908,8 +934,11 @@ public class NeuRonNode extends Thread {
                 oldFuture.cancel(false);
             }
             final NodeState node = nodes.get(nid);
-            if (!node.isReachable)
+            if (!node.isReachable) {
                 log(nid + " reachable");
+                // ideal, but could not afford to do this
+                // findPaths(node, false);
+            }
             node.isReachable = true;
 
             ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
@@ -920,7 +949,7 @@ public class NeuRonNode extends Thread {
                         nodes.get(myNid).latencies.remove(nid);
                         rendezvousClients.remove(node);
 
-                        // XXX remove: findPaths(node);
+                        findPaths(node, false);
                     }
                 }
             }), linkTimeout, TimeUnit.SECONDS);
@@ -1289,18 +1318,16 @@ public class NeuRonNode extends Thread {
                         if (r.isReachable)
                             servers.add(r);
 
-                    // are any of the default rendezvous servers in our current
-                    // set?
-                    boolean hasDefaults = false;
-                    for (NodeState r : defaults) {
-                        hasDefaults = rs.contains(r);
-                        break;
-                    }
+                    // rs consists of either default rendezvous servers or
+                    // non-default rendezvous, but never a mix of both; test
+                    // which type it is
+                    boolean hasDefaultsOnly = rs.isEmpty() ?
+                        true : defaults.contains(rs.iterator().next());
 
                     // the following code attempts to add default rendezvous
                     // servers back into rs
                     HashSet<NodeState> old = new HashSet<NodeState>(rs);
-                    if (hasDefaults) {
+                    if (hasDefaultsOnly) {
                         // if any default rendezvous servers are in use, then
                         // don't clear rs; simply add any more default servers
                         // that are working
@@ -1342,7 +1369,6 @@ public class NeuRonNode extends Thread {
                         // look for failovers
 
                         HashSet<NodeState> cands = new HashSet<NodeState>();
-                        HashSet<NodeState> candsInServers = new HashSet<NodeState>();
 
                         // first, start by looking at the failovers that are
                         // currently in use for this col/row, so that we can
@@ -1355,19 +1381,8 @@ public class NeuRonNode extends Thread {
                         for (NodeState f : colrowFailovers) {
                             if (!isFailedRendezvous(f, dst)) {
                                 cands.add(f);
-
-				if(servers.contains(f))
-				    candsInServers.add(f);
                             }
                         }
-
-			// if any of the candidates are already selected to be in
-			// 'servers', we want to make sure that we only choose from
-			// these choices.
-			if(!candsInServers.isEmpty()) {
-			    cands.clear();
-			    cands.addAll(candsInServers);
-			}
 
                         if (cands.isEmpty()) {
 
@@ -1392,8 +1407,18 @@ public class NeuRonNode extends Thread {
                             }
                         }
 
+                        // if any of the candidates are already selected to be in
+                        // 'servers', we want to make sure that we only choose from
+                        // these choices.
+                        HashSet<NodeState> candsInServers = new HashSet<NodeState>();
+                        for (NodeState cand : cands)
+                            if (servers.contains(cand))
+                                candsInServers.add(cand);
+
                         // choose candidate uniformly at random
-                        ArrayList<NodeState> candsList = new ArrayList<NodeState>(cands);
+                        ArrayList<NodeState> candsList = new
+                            ArrayList<NodeState>(candsInServers.isEmpty() ?
+                                    cands : candsInServers);
                         if (candsList.size() == 0) {
                             log("no failover candidates! giving up; " + report);
                         } else {
@@ -1718,28 +1743,35 @@ public class NeuRonNode extends Thread {
     }
 
     /**
-     * counts the number of paths to a particular node.
-     * TODO reset latency
+     * Counts the number of paths to a particular node.
+     *
+     * Note that this does not get run whenever nodes become reachable, only
+     * when they become unreachable (and also in batch periodically).
+     * Furthermore, we do not run this whenever we get a measurement packet.
+     * The reason for these infidelities is one of performance.
      */
-    private int findPaths(NodeState node) {
+    private int findPaths(NodeState node, boolean batch) {
         ArrayList<NodeState> clients = getAllRendezvousClients();
         ArrayList<NodeState> servers = lastRendezvousServers;
         HashSet<NodeState> options = new HashSet<NodeState>();
         short min = resetLatency;
         short nid = node.info.id;
+        boolean wasDead = node.hop == 0;
         node.hop = 0;
 
         // direct hop
         if (node.isReachable) {
-            node.hop = node.info.id;
             options.add(node);
+            node.hop = node.info.id;
+            min = nodes.get(myNid).latencies.get(node.info.id);
         }
 
-        // find best rendezvous client. note that this includes node itself.
+        // find best rendezvous client. (`clients` are all reachable.)
         for (NodeState client : clients) {
             short val = client.latencies.get(nid);
             if (val != resetLatency) {
                 options.add(client);
+                val += nodes.get(myNid).latencies.get(client.info.id);
                 if (val < min) {
                     node.hop = client.info.id;
                     min = val;
@@ -1758,8 +1790,15 @@ public class NeuRonNode extends Thread {
             }
         }
 
-        if (node.hop == 0)
-            log("node " + node + " down");
+        // we always print something in batch mode. we also print stuff if
+        // there was a change in the node's up/down status.
+        boolean isDead = node.hop == 0;
+        boolean cameUp = isDead && !wasDead, wentDown = !isDead && wasDead;
+        if (!batch || cameUp || wentDown) {
+            String specialUpdate = cameUp ? " up" : (wentDown ? " down" : "");
+            log("node " + node + specialUpdate + " hop " + node.hop + " total "
+                    + options.size());
+        }
 
         return options.size();
     }
@@ -1773,7 +1812,7 @@ public class NeuRonNode extends Thread {
         int count = 0;
         int numNodesReachable = 0;
         for (NodeState node : otherNodes) {
-            int d = findPaths(node);
+            int d = findPaths(node, true);
             count += d;
             numNodesReachable += d > 0 ? 1 : 0;
         }
