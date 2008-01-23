@@ -1791,7 +1791,11 @@ public class NeuRonNode extends Thread {
         }
 
         // we always print something in non-batch mode. we also print stuff if
-        // there was a change in the node's up/down status.
+        // there was a change in the node's up/down status. if a node is reachable
+	// then findPaths(node,) will only be called during batch processing, and
+	// so wasDead will have been set either by the last unreachable call or by
+	// the previous batch call. thus, the first batch call after a node goes
+	// up, the "up" message will be printed.
         boolean isDead = node.hop == 0;
         boolean cameUp = !isDead && wasDead, wentDown = isDead && !wasDead;
         if (!batch || cameUp || wentDown) {
