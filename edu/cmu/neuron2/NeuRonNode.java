@@ -1790,7 +1790,7 @@ public class NeuRonNode extends Thread {
             }
         }
 
-        // we always print something in batch mode. we also print stuff if
+        // we always print something in non-batch mode. we also print stuff if
         // there was a change in the node's up/down status.
         boolean isDead = node.hop == 0;
         boolean cameUp = !isDead && wasDead, wentDown = isDead && !wasDead;
