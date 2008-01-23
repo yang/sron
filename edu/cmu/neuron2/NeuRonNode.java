@@ -1345,7 +1345,8 @@ public class NeuRonNode extends Thread {
 
                         // first, start by looking at the failovers that are
                         // currently in use for this col/row, so that we can
-                        // share when possible
+                        // share when possible. that is, if we know that a
+			// failover works for a destination, keep using it.
 
                         HashSet<NodeState> colrowFailovers = new HashSet<NodeState>();
                         colrowFailovers.addAll(rowmap.get(r0));
@@ -1360,7 +1361,9 @@ public class NeuRonNode extends Thread {
 
                             // only once we have determined that no current
                             // failover works for us do we go ahead and randomly
-                            // select a new failover
+                            // select a new failover. this is a blind choice;
+			    // we don't have these node's routing recommendations,
+			    // so we could not hope to do better.
 
                             // get candidates from col
                             for (int r1 = 0; r1 < numRows; r1++) {
@@ -1386,6 +1389,8 @@ public class NeuRonNode extends Thread {
                             log("new failover for " + dst + ": " + failover + ", prev rs = " + rs + "; " + report);
                             rs.add(failover);
                             servers.add(failover);
+
+			    // share this failover in this routing iteration too
                             if (!allDefaults.contains(failover)) {
                                 rowmap.get(r0).add(failover);
                                 colmap.get(c0).add(failover);
