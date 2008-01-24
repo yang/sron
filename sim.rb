@@ -76,6 +76,7 @@ $num_runs = num_runs
 $get_subdir = get_subdir
 $datadir = datadir
 def agg_runs(scheme, num_nodes, failure_rate, xs)
+  neighborBroadcastPeriod = 30
   datadir = $datadir
   for run in 1..$num_runs
     subdir = eval $get_subdir
@@ -87,13 +88,22 @@ def agg_runs(scheme, num_nodes, failure_rate, xs)
           start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
           f.seek(0)
           bytes, end_time = 0, 0
+          rounds = 0
           f.grep(/sent (measurements|recs)/) do |line|
             fields = line.split(' ')
             end_time = Integer(fields[0])
             fields = line.split(', ')
             bytes += fields[1].split(' ')[0].to_i
+            rounds = rounds + 1
           end
-          xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
+          rounds = rounds / 2
+
+          if rounds == 0
+              rounds = 1
+          end
+          #xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
+          #puts (rounds * neighborBroadcastPeriod)
+          xs << (bytes.to_f * 8/1000) / (rounds * neighborBroadcastPeriod)
         rescue
         end
       end
