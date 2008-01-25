@@ -1360,7 +1360,7 @@ public class NeuRonNode extends Thread {
                     }
 
                     if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
-                        // create
+                        // create debug string
                         String s = "defaults";
                         for (NodeState r : defaults) {
                             s += " " + r.info.id + (
@@ -1376,7 +1376,7 @@ public class NeuRonNode extends Thread {
                         // first, start by looking at the failovers that are
                         // currently in use for this col/row, so that we can
                         // share when possible. that is, if we know that a
-			// failover works for a destination, keep using it.
+                        // failover works for a destination, keep using it.
 
                         HashSet<NodeState> colrowFailovers = new HashSet<NodeState>();
                         colrowFailovers.addAll(rowmap.get(r0));
@@ -1392,8 +1392,8 @@ public class NeuRonNode extends Thread {
                             // only once we have determined that no current
                             // failover works for us do we go ahead and randomly
                             // select a new failover. this is a blind choice;
-			    // we don't have these node's routing recommendations,
-			    // so we could not hope to do better.
+                            // we don't have these node's routing recommendations,
+                            // so we could not hope to do better.
 
                             // get candidates from col
                             for (int r1 = 0; r1 < numRows; r1++) {
@@ -1552,15 +1552,15 @@ public class NeuRonNode extends Thread {
                 short minhop = -1;
                 for (short hop : hops) {
                     if (hop != src.info.id) {
-                        short src2hop = src.latencies.get(hop);
-                        short dst2hop = dst.latencies.get(hop);
-                        short latency = (short) (src2hop + dst2hop);
+                        int src2hop = src.latencies.get(hop);
+                        int dst2hop = dst.latencies.get(hop);
+                        int latency = src2hop + dst2hop;
                         // DEBUG
                         // log(src + "->" + hop + " is " + src2hop + ", " + hop +
                         //         "->" + dst + " is " + dst2hop + ", sum " +
                         //         latency);
                         if (latency < min) {
-                            min = latency;
+                            min = (short) latency;
                             minhop = hop;
                         }
                     }
