@@ -446,7 +446,7 @@ public class NeuRonNode extends Thread {
                             }
                         }
                     }
-                }), 1, neighborBroadcastPeriod);
+                }), 7, neighborBroadcastPeriod);
 
                 if (enableSubpings) {
                     safeSchedule(safeRun(new Runnable() {
@@ -461,7 +461,7 @@ public class NeuRonNode extends Thread {
                     public void run() {
                         System.gc();
                     }
-                }, 1, gcPeriod);
+                }, 3, gcPeriod);
 
                 final InetAddress coordAddr = InetAddress.getByName(coordinatorHost);
                 scheduler.schedule(safeRun(new Runnable() {
@@ -1784,6 +1784,7 @@ public class NeuRonNode extends Thread {
         short min = resetLatency;
         short nid = node.info.id;
         boolean wasDead = node.hop == 0;
+        NodeState self = nodes.get(myNid);
 
         // we would like to keep recommended nodes (they should be the best
         // choice, but also we have no ping data). but if it was not obtained
@@ -1802,30 +1803,33 @@ public class NeuRonNode extends Thread {
         if (node.isReachable) {
             options.add(node);
             node.hop = node.info.id;
-            min = nodes.get(myNid).latencies.get(node.info.id);
+            min = self.latencies.get(node.info.id);
         }
 
         // find best rendezvous client. (`clients` are all reachable.)
         for (NodeState client : clients) {
-            short val = client.latencies.get(nid);
+            int val = client.latencies.get(nid);
             if (val != resetLatency) {
                 options.add(client);
-                val += nodes.get(myNid).latencies.get(client.info.id);
+                val += self.latencies.get(client.info.id);
                 if (val < min) {
                     node.hop = client.info.id;
-                    min = val;
+                    min = (short) val;
                 }
             }
         }
 
         // see if a rendezvous server can serve as the hop. (can't just iterate
         // through hopOptions, because that doesn't tell us which server to go
-        // through.)
+        // through.) using the heuristic of just our latency to the server
         for (NodeState server : servers) {
             if (server.dstsPresent.contains(nid)) {
                 options.add(server);
-                if (node.hop == 0)
+                short val = self.latencies.get(server.info.id);
+                if (node.hop == 0 && val < min) {
                     node.hop = server.info.id;
+                    min = val;
+                }
             }
         }
 
@@ -1839,10 +1843,10 @@ public class NeuRonNode extends Thread {
 
         // we always print something in non-batch mode. we also print stuff if
         // there was a change in the node's up/down status. if a node is reachable
-	// then findPaths(node,) will only be called during batch processing, and
-	// so wasDead will have been set either by the last unreachable call or by
-	// the previous batch call. thus, the first batch call after a node goes
-	// up, the "up" message will be printed.
+        // then findPaths(node,) will only be called during batch processing, and
+        // so wasDead will have been set either by the last unreachable call or by
+        // the previous batch call. thus, the first batch call after a node goes
+        // up, the "up" message will be printed.
         if (!batch || cameUp || wentDown) {
             String stateChange = cameUp ? " up" : (wentDown ? " down" : "");
             log("node " + node + stateChange + " hop " + node.hop + " total "
