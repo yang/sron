@@ -78,10 +78,10 @@ public class RonTest {
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         String simData = props.getProperty("simData", "");
 
-        // InetAddress.getLocalHost() fails when # of nodes is large - hence optimizing
-        int basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
+        int basePort = Integer.parseInt(props.getProperty("basePort", mode == RunMode.SIM ? "15000" : "9000"));
         NodeInfo coordNode = new NodeInfo();
         coordNode.id = 0;
+        // InetAddress.getLocalHost() fails when # of nodes is large - hence optimizing
         String coordinatorHost;
         try {
             coordinatorHost = props.getProperty("coordinatorHost",

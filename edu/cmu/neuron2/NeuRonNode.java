@@ -209,9 +209,9 @@ public class NeuRonNode extends Thread {
         this.coordinatorHost = coordinatorHost;
         this.coordNode = coordNode;
 
-        basePort = Integer.parseInt(props.getProperty("basePort", "9000"));
         mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
-        neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "60"));
+        basePort = coordNode.port;
+        neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "30"));
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
         subpingPeriod = Integer.parseInt(props.getProperty("subpingPeriod", "10"));
         enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
@@ -224,9 +224,9 @@ public class NeuRonNode extends Thread {
         //}
         membershipTimeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         linkTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + membershipTimeout));
-        scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
+        scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SQRT").toUpperCase());
 
-        smoothingFactor = Double.parseDouble(props.getProperty("smoothingFactor", "0.9"));
+        smoothingFactor = Double.parseDouble(props.getProperty("smoothingFactor", "0.1"));
 
         Formatter minfmt = new Formatter() {
             public String format(LogRecord record) {
@@ -450,10 +450,10 @@ public class NeuRonNode extends Thread {
 
                 if (enableSubpings) {
                     safeSchedule(safeRun(new Runnable() {
-                            public void run() {
-                                subping();
-                            }
-                        }), 5, subpingPeriod);
+                        public void run() {
+                            subping();
+                        }
+                    }), 5, subpingPeriod);
                     // TODO should these initial offsets be constants?
                 }
 
@@ -563,8 +563,8 @@ public class NeuRonNode extends Thread {
     }
 
     private void handleSubpongFwd(Subprobe p) {
-        long rtt = System.currentTimeMillis() - p.time;
-        log("subpong from " + p.nid + " via " + p.src + ": " + rtt);
+        long latency = (System.currentTimeMillis() - p.time) / 2;
+        log("subpong from " + p.nid + " via " + p.src + ": " + latency + ", time " + p.time);
     }
 
     private void pingAll() {
@@ -643,7 +643,7 @@ public class NeuRonNode extends Thread {
             im.members = getMemberInfos();
             sendObject(im, join.addr, join.port, (short)-1);
         }
-        
+
         @Override
         public void messageReceived(IoSession session, Object obj)
                 throws Exception {
@@ -655,38 +655,38 @@ public class NeuRonNode extends Thread {
                         if (msg instanceof Join) {
                             final Join join = (Join) msg ;
                             if (id2oid.values().contains(msg.src)) {
-                            	// we already added this guy; just resend him the init msg
-                            	sendInit(addr2id.get(join.addr), join);
+                                // we already added this guy; just resend him the init msg
+                                sendInit(addr2id.get(join.addr), join);
                             } else {
-                            	// need to add this guy and send him the init msg (if there's space)
-	                            if (!capJoins || coordNodes.size() < numNodesHint) {
+                                // need to add this guy and send him the init msg (if there's space)
+                                if (!capJoins || coordNodes.size() < numNodesHint) {
                                     short newNid = nidGen.next();
-	                                addMember(newNid, join.addr, join.port, join.src);
-	                                if (blockJoins) {
-	                                    if (coordNodes.size() >= numNodesHint) {
-	                                        // time to broadcast ims to everyone
-	                                        ArrayList<NodeInfo> memberList = getMemberInfos();
-	                                        for (NodeInfo m : memberList) {
-	                                            Init im = new Init();
-	                                            im.id = m.id;
-	                                            im.members = memberList;
-	                                            sendObject(im, m);
-	                                        }
-	                                    }
-	                                } else {
-	                                    sendInit(newNid, join);
-	                                    broadcastMembershipChange(newNid);
-	                                }
-	
-	                                if (coordNodes.size() == numNodesHint) {
-	                                    semAllJoined.release();
-	                                }
-	                            } else if (capJoins && coordNodes.size() == numNodesHint) {
-	                                Init im = new Init();
-	                                im.id = -1;
-	                                im.members = new ArrayList<NodeInfo>();
-	                                sendObject(im, join.addr, join.port, (short)-1);
-	                            }
+                                    addMember(newNid, join.addr, join.port, join.src);
+                                    if (blockJoins) {
+                                        if (coordNodes.size() >= numNodesHint) {
+                                            // time to broadcast ims to everyone
+                                            ArrayList<NodeInfo> memberList = getMemberInfos();
+                                            for (NodeInfo m : memberList) {
+                                                Init im = new Init();
+                                                im.id = m.id;
+                                                im.members = memberList;
+                                                sendObject(im, m);
+                                            }
+                                        }
+                                    } else {
+                                        sendInit(newNid, join);
+                                        broadcastMembershipChange(newNid);
+                                    }
+
+                                    if (coordNodes.size() == numNodesHint) {
+                                        semAllJoined.release();
+                                    }
+                                } else if (capJoins && coordNodes.size() == numNodesHint) {
+                                    Init im = new Init();
+                                    im.id = -1;
+                                    im.members = new ArrayList<NodeInfo>();
+                                    sendObject(im, join.addr, join.port, (short)-1);
+                                }
                             }
                         } else if (coordNodes.containsKey(msg.src)) {
                             log("recv." + msg.getClass().getSimpleName(), "from " +
@@ -911,16 +911,12 @@ public class NeuRonNode extends Thread {
 
         if (rendezvousClients.add(node)) {
             log("rendezvous client " + node + " added");
-            ///XXX
-            System.out.println("rendezvous client " + node + " added");
         }
 
         ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
             public void run() {
                 if (rendezvousClients.remove(node)) {
                     log("rendezvous client " + node + " removed");
-                    ///XXX
-                    System.out.println("rendezvous client " + node + " removed");
                 }
             }
         }), clientTimeout, TimeUnit.SECONDS);
@@ -936,8 +932,11 @@ public class NeuRonNode extends Thread {
             final NodeState node = nodes.get(nid);
             if (!node.isReachable) {
                 log(nid + " reachable");
-                // ideal, but could not afford to do this
-                // findPaths(node, false);
+                if (node.hop == 0) {
+                    node.isHopRecommended = false;
+                    node.cameUp = true;
+                    node.hop = nid;
+                }
             }
             node.isReachable = true;
 
@@ -1014,6 +1013,9 @@ public class NeuRonNode extends Thread {
     /**
      * a coordinator-only method
      *
+     * NOTE: there is a hack workaround here for sim mode, because addr2id is
+     * not storing unique host:port combos, only unique hosts.
+     *
      * @param nid
      */
     private void removeMember(short nid) {
@@ -1022,7 +1024,8 @@ public class NeuRonNode extends Thread {
         id2oid.remove(nid);
         NodeInfo info = coordNodes.remove(nid);
         Short mid = addr2id.remove(info.addr);
-        assert mid != null;
+        if (mode != RunMode.SIM)
+            assert mid != null;
         currentStateVersion++;
         broadcastMembershipChange(nid);
     }
@@ -1059,8 +1062,10 @@ public class NeuRonNode extends Thread {
         // consistency cleanups: check that all nid references are still valid nid's
 
         for (NodeState state : nodes.values()) {
-            if (!newNids.contains(state.hop))
+            if (state.hop != 0 && !newNids.contains(state.hop)) {
                 state.hop = state.info.id;
+                state.isHopRecommended = false;
+            }
 
             for (Iterator<Short> i = state.hopOptions.iterator(); i.hasNext();)
                 if (!newNids.contains(i.next()))
@@ -1351,8 +1356,6 @@ public class NeuRonNode extends Thread {
                         }
                     }
                     if (!old.equals(rs)) {
-                        ///XXX
-                        System.out.println("restored rendezvous server for " + dst + " from " + old + " to " + rs);
                         log("restored rendezvous server for " + dst + " from " + old + " to " + rs);
                     }
 
@@ -1453,9 +1456,6 @@ public class NeuRonNode extends Thread {
                             }
                         }
 
-                        ///XXX
-                        if (myNid == 1 && dst.info.id == 8)
-                            System.out.println(rs);
                         if (rs.isEmpty()) {
                             log("all rs to " + dst + " failed");
                             System.out.println("ALL FAILED!");
@@ -1523,10 +1523,6 @@ public class NeuRonNode extends Thread {
             // dst <- nbrs, hop <- any
             findHops(dsts, memberNids, src, recs);
 
-            ///XXX
-            if (myNid == 7 && src.info.id == 1)
-                System.out.println(routesToString(recs));
-
             /*
              * TODO: need to additionally send back info about *how good* the
              * best hop is, so that the receiver can decide which of the many
@@ -1544,6 +1540,10 @@ public class NeuRonNode extends Thread {
         log("sent recs, " + totalSize + " bytes, to " + clients);
     }
 
+    /**
+     * Given the src, find for each dst in dsts the ideal hop from hops,
+     * storing these into recs.  This may choose the dst itself as the hop.
+     */
     private void findHops(ArrayList<NodeState> dsts,
             ArrayList<Short> hops, NodeState src, ArrayList<Rec> recs) {
         for (NodeState dst : dsts) {
@@ -1555,17 +1555,42 @@ public class NeuRonNode extends Thread {
                         short src2hop = src.latencies.get(hop);
                         short dst2hop = dst.latencies.get(hop);
                         short latency = (short) (src2hop + dst2hop);
+                        // DEBUG
+                        // log(src + "->" + hop + " is " + src2hop + ", " + hop +
+                        //         "->" + dst + " is " + dst2hop + ", sum " +
+                        //         latency);
                         if (latency < min) {
                             min = latency;
                             minhop = hop;
                         }
                     }
                 }
-                assert minhop != -1;
-                Rec rec = new Rec();
-                rec.dst = dst.info.id;
-                rec.via = minhop;
-                recs.add(rec);
+
+                // it's possible for us to have not found an ideal hop. this
+                // may be counter-intuitive, since even if src<->dst is broken,
+                // the fact that both are our clients means we should be able
+                // to serve as a hop. however it may be that either one of them
+                // was, or we were, recently added as a member to the network,
+                // so they never had a chance to ping us yet (and hence we're
+                // missing from their measurements). (TODO also is it possible
+                // that we're missing their measurement entirely? are all
+                // clients necessarily added on demand by measurement packets?)
+                // what we can do is to try finding our own latency to the hop
+                // (perhaps we've had a chance to ping them), and failing that,
+                // estimating the latency (only if one of us was newly added).
+                // however, these errors are transient anyway - by the next
+                // routing period, several pings will have taken place that
+                // would guarantee (or there was a failure, and eventually one
+                // of {src,dst} will fall out of our client set).
+                if (minhop != -1) {
+                    // DEBUG
+                    // log("recommending " + src + "->" + minhop + "->" + dst +
+                    //         " latency " + min);
+                    Rec rec = new Rec();
+                    rec.dst = dst.info.id;
+                    rec.via = minhop;
+                    recs.add(rec);
+                }
             }
         }
     }
@@ -1665,9 +1690,10 @@ public class NeuRonNode extends Thread {
     }
 
     private void updateMeasurements(Measurements m) {
-        NodeState myState = nodes.get(m.src);
+        NodeState src = nodes.get(m.src);
         for (int i = 0; i < m.probeTable.length; i++)
-            myState.latencies.put(memberNids.get(i), m.probeTable[i]);
+            src.latencies.put(memberNids.get(i), m.probeTable[i]);
+        // NOTE we aren't setting node.{hop,cameUp,isHopRecommended=false}...
     }
 
     private void handleRecommendations(RoutingRecs msg) {
@@ -1690,11 +1716,13 @@ public class NeuRonNode extends Thread {
                      * must be some threshold in time past which we disregard old
                      * latencies. must keep some history
                      */
-                    nodes.get(rec.dst).hopOptions.add(rec.via);
-                    nodes.get(rec.dst).hop = rec.via;
                 } else {
                     // blindly trust the recommendations
-                    nodes.get(rec.dst).hop = rec.via;
+                    NodeState node = nodes.get(rec.dst);
+                    if (node.hop == 0)
+                        node.cameUp = true;
+                    node.isHopRecommended = true;
+                    node.hop = rec.via;
                 }
             }
         }
@@ -1715,9 +1743,6 @@ public class NeuRonNode extends Thread {
                     r.remoteFailures.add(dst);
                 }
             }
-            ///XXX
-            if (r.info.id == 7 && myNid == 1)
-                System.out.println("new remote failures " + r.remoteFailures);
         }
     }
 
@@ -1748,7 +1773,9 @@ public class NeuRonNode extends Thread {
      * Note that this does not get run whenever nodes become reachable, only
      * when they become unreachable (and also in batch periodically).
      * Furthermore, we do not run this whenever we get a measurement packet.
-     * The reason for these infidelities is one of performance.
+     * The reason for these infelicities is one of performance.
+     *
+     * The logic among hop, isHopRecommended, and cameUp is tricky.
      */
     private int findPaths(NodeState node, boolean batch) {
         ArrayList<NodeState> clients = getAllRendezvousClients();
@@ -1757,7 +1784,19 @@ public class NeuRonNode extends Thread {
         short min = resetLatency;
         short nid = node.info.id;
         boolean wasDead = node.hop == 0;
-        node.hop = 0;
+
+        // we would like to keep recommended nodes (they should be the best
+        // choice, but also we have no ping data). but if it was not obtained
+        // via recommendation (i.e., a previous findPaths() got this hop), then
+        // we should feel free to update it.
+        if (node.hop == 0) {
+            node.isHopRecommended = false;
+        } else {
+            // we are not adding the hop
+            if (!node.isHopRecommended) {
+                node.hop = 0;
+            }
+        }
 
         // direct hop
         if (node.isReachable) {
@@ -1790,17 +1829,23 @@ public class NeuRonNode extends Thread {
             }
         }
 
+        boolean isDead = node.hop == 0;
+        // seems that (!isDead && wasDead) can be true, if a hop is found here
+        // from a measurement (from a rclient).
+        boolean cameUp = !isDead && wasDead || node.cameUp;
+        boolean wentDown = isDead && !wasDead;
+        // reset node.cameUp
+        node.cameUp = false;
+
         // we always print something in non-batch mode. we also print stuff if
         // there was a change in the node's up/down status. if a node is reachable
 	// then findPaths(node,) will only be called during batch processing, and
 	// so wasDead will have been set either by the last unreachable call or by
 	// the previous batch call. thus, the first batch call after a node goes
 	// up, the "up" message will be printed.
-        boolean isDead = node.hop == 0;
-        boolean cameUp = !isDead && wasDead, wentDown = isDead && !wasDead;
         if (!batch || cameUp || wentDown) {
-            String specialUpdate = cameUp ? " up" : (wentDown ? " down" : "");
-            log("node " + node + specialUpdate + " hop " + node.hop + " total "
+            String stateChange = cameUp ? " up" : (wentDown ? " down" : "");
+            log("node " + node + stateChange + " hop " + node.hop + " total "
                     + options.size());
         }
 
@@ -1833,6 +1878,7 @@ public class NeuRonNode extends Thread {
         public String toString() {
             return "" + info.id;
         }
+
         /**
          * not null
          */
@@ -1857,24 +1903,40 @@ public class NeuRonNode extends Thread {
          *  - values are not resetLatency
          *  - undefined if not a rendezvous client
          */
-
         public final ShortShortMap latencies = new ShortShortMap(resetLatency);
 
         /**
          * the recommended intermediate hop for us to get to this node, or 0 if
          * no way we know of to get to that node, and thus believe the node is
-         * gone.
+         * down.
          *
          * invariants:
-         *  - always refers to a member or 0; enforced in
-         *    updateMembers()
+         *  - always refers to a member or 0; enforced in updateMembers()
          *  - never refers to dead node; enforced in resetTimeoutAtNode()
-         *  - may refer to the node of this nodestate (may be dst)
+         *  - may be nid (may be dst)
+         *  - initially defaults to dst (since we don't know hops to it)
          *  - never refers to the owning neuronnode (never is src)
-         *  - cannot be the nid if !isReachable
+         *  - cannot be nid if !isReachable
          */
-
         public short hop;
+
+        /**
+         * this is set at certain places where we determine that a node is
+         * alive, and reset in the next findPaths().  the only reason we need
+         * this is to help produce the correct logging output for the
+         * effectiveness timing analysis.
+         */
+        public boolean cameUp;
+
+        /**
+         * this indicates how we got this hop.  this is set in
+         * handleRecommendations(), reset in resetTimeoutAtNode(), and
+         * read/reset from batch-mode findPaths().  if it was recommended to
+         * us, then we will want to keep it; otherwise, it was just something
+         * we found in failover mode, so are free to wipe it out.  this var has
+         * no meaning when hop == 0.
+         */
+        public boolean isHopRecommended;
 
         /**
          * remote failures. applies only if this nodestate is of a rendezvous
@@ -1900,11 +1962,11 @@ public class NeuRonNode extends Thread {
         /**
          * this is unused at the moment. still need to re-design.
          */
-
         public final HashSet<Short> hopOptions = new HashSet<Short>();
 
         public NodeState(NodeInfo info) {
             this.info = info;
+            this.hop = info.id;
             latencies.put(info.id, (short) 0);
         }
 
