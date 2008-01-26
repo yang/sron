@@ -213,7 +213,6 @@ public class NeuRonNode extends Thread {
         basePort = coordNode.port;
         neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "30"));
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
-        subpingPeriod = Integer.parseInt(props.getProperty("subpingPeriod", "10"));
         enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
@@ -222,6 +221,7 @@ public class NeuRonNode extends Thread {
         //} else {
             probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
         //}
+        subpingPeriod = Integer.parseInt(props.getProperty("subpingPeriod", "" + probePeriod));
         membershipTimeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
         linkTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + membershipTimeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SQRT").toUpperCase());
@@ -543,23 +543,30 @@ public class NeuRonNode extends Thread {
     }
 
     private void handleSubping(Subprobe p) {
-        if (p.nid == myNid) {
+        if (p.nid == myNid && nodes.containsKey(p.src)) {
             sendObject(subprobe(p.nid, p.time, SUBPONG_FWD), p.src);
             log("subprobe", "direct subpong from/to " + p.src);
-        } else {
+        } else if (nodes.containsKey(p.nid) && nodes.containsKey(p.src)) {
+            // we also checked for p.src because eventually we'll need to
+            // forward the subpong back too; if we don't know him, no point in
+            // sending a subping
             sendObject(subprobe(p.src, p.time, SUBPING_FWD), p.nid);
             log("subprobe", "subping fwd from " + p.src + " to " + p.nid);
         }
     }
 
     private void handleSubpingFwd(Subprobe p) {
-        sendObject(subprobe(p.nid, p.time, SUBPONG), p.src);
-        log("subprobe", "subpong to " + p.nid + " via " + p.src);
+        if (nodes.containsKey(p.src)) {
+            sendObject(subprobe(p.nid, p.time, SUBPONG), p.src);
+            log("subprobe", "subpong to " + p.nid + " via " + p.src);
+        }
     }
 
     private void handleSubpong(Subprobe p) {
-        sendObject(subprobe(p.src, p.time, SUBPONG_FWD), p.nid);
-        log("subprobe", "subpong fwd from " + p.src + " to " + p.nid);
+        if (nodes.containsKey(p.nid)) {
+            sendObject(subprobe(p.src, p.time, SUBPONG_FWD), p.nid);
+            log("subprobe", "subpong fwd from " + p.src + " to " + p.nid);
+        }
     }
 
     private void handleSubpongFwd(Subprobe p) {
@@ -1802,8 +1809,10 @@ public class NeuRonNode extends Thread {
         // direct hop
         if (node.isReachable) {
             options.add(node);
-            node.hop = node.info.id;
-            min = self.latencies.get(node.info.id);
+            if (!node.isHopRecommended) {
+                node.hop = node.info.id;
+                min = self.latencies.get(node.info.id);
+            }
         }
 
         // find best rendezvous client. (`clients` are all reachable.)
@@ -1812,7 +1821,7 @@ public class NeuRonNode extends Thread {
             if (val != resetLatency) {
                 options.add(client);
                 val += self.latencies.get(client.info.id);
-                if (val < min) {
+                if (!node.isHopRecommended && val < min) {
                     node.hop = client.info.id;
                     min = (short) val;
                 }
