@@ -106,8 +106,13 @@ public class NeuRonNode extends Thread {
 
     private final Hashtable<InetAddress, Short> addr2id = new Hashtable<InetAddress, Short>();
 
+    // Specific to this node. Lookup from destination to default rs's to it
     private final Hashtable<Short, HashSet<NodeState>> defaultRendezvousServers =
         new Hashtable<Short, HashSet<NodeState>>();
+
+    // Lookup from node to a set of its rendezvous servers
+    private final Hashtable<NodeState, HashSet<NodeState>> nodeDefaultRSs =
+        new Hashtable<NodeState, HashSet<NodeState>>();
 
     private short currentStateVersion;
 
@@ -160,9 +165,6 @@ public class NeuRonNode extends Thread {
     private final ArrayList<NodeState> lastRendezvousServers = new ArrayList<NodeState>();
 
     private final double directBonus, hysteresisBonus;
-
-    // TODO discard
-    private final HashSet<NodeState> allDefaultServers = new HashSet<NodeState>();
 
     private final long startTime = System.currentTimeMillis();
 
@@ -1185,8 +1187,12 @@ public class NeuRonNode extends Thread {
          *
          * this should correctly handle nodes that reappear in the grid.
          */
+
+	// TODO: does not correctly handle nodes that reappear in grid.
+
         rendezvousClients.clear();
         defaultRendezvousServers.clear();
+	nodeDefaultRSs.clear();
         int rz = gridRow.get(self);
         int cz = gridColumn.get(self);
         HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
@@ -1223,7 +1229,7 @@ public class NeuRonNode extends Thread {
             rendezvousClientTimeouts.put(clientNode.info.id, future);
         }
 
-        // add the rendezvous servers to all nodes
+        // add the default rendezvous servers to all destinations
         for (int r0 = 0; r0 < numRows; r0++) {
             for (int c0 = 0; c0 < numCols; c0++) {
                 NodeState dst = grid[r0][c0];
@@ -1253,25 +1259,44 @@ public class NeuRonNode extends Thread {
                 }
             }
         }
+
+	// update nodeDefaultRSs so that each node has its default rendezvous servers
+	for(NodeState node : nodes.values()) {
+
+	    int rn = gridRow.get(node);
+	    int cn = gridColumn.get(node);
+
+	    // We know upper bound on number of elements. should be 1/(default load factor)*
+	    HashSet<NodeState> nodeDefaults = new HashSet<NodeState>((int) 1.4*(numRows + numCols - 1));
+
+	    // Put in node's row and column. Node that there could be repeats.
+	    // NOTE: for duplicated nodes, gridRow and gridColumn refer to last instance.
+	    for (int r1 = 0; r1 < numRows; r1++)
+		nodeDefaults.add(grid[r1][cn]);
+	    for (int c1 = 0; c1 < numCols; c1++)
+		nodeDefaults.add(grid[rn][c1]);
+
+	    // Could also make an array of nodeDefaults, for less memory usage/faster
+	    nodeDefaultRSs.put(node, nodeDefaults);
+	}
+
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
         }
         lastRendezvousServers.clear();
 
-        allDefaultServers.clear();
-        allDefaultServers.addAll(rendezvousClients);
-
-        for (int r0 = 0; r0 < numRows; r0++) {
-            for (int c0 = 0; c0 < numCols; c0++) {
-                NodeState n = grid[r0][c0];
-                for (int r1 = 0; r1 < numRows; r1++)
-                    n.defaultClients.add(grid[r1][c0]);
-                for (int c1 = 0; c1 < numCols; c1++)
-                    n.defaultClients.add(grid[r0][c1]);
-                n.defaultClients.remove(self);
-            }
-        }
+	// This code is no longer operational. Not yet deleted in case we need similar soon.
+	//        for (int r0 = 0; r0 < numRows; r0++) {
+	//            for (int c0 = 0; c0 < numCols; c0++) {
+	//                NodeState n = grid[r0][c0];
+	//                for (int r1 = 0; r1 < numRows; r1++)
+	//                    n.defaultClients.add(grid[r1][c0]);
+	//                for (int c1 = 0; c1 < numCols; c1++)
+	//                    n.defaultClients.add(grid[r0][c1]);
+	//                n.defaultClients.remove(self);
+	//            }
+	//        }
 
         log("state " + currentStateVersion + ", mbrs " + nids);
     }
@@ -1328,8 +1353,8 @@ public class NeuRonNode extends Thread {
      * NEW ALGO
      *
      * // CHANGES START
-     * build a rowmap (row -&rt; set(rendezvous)) and colmap
-     * call these F
+     * build a hashtable for all rendezvous nodes currently used
+     * call this F
      * // CHANGES END
      * for dst
      *   if dst is not down
@@ -1339,9 +1364,9 @@ public class NeuRonNode extends Thread {
      *       rs = working subset of ds
      *     if rs = []
      *       // CHANGES START
-     *       for active failover in dst's row/col (according to F)
+     *       for active failover in dst's default rendezvous nodes (according to F)
      *         if failover works to dst, choose it as failover for dst as well
-     *       choose rand node from dst's row/col that is not currently in use
+     *       choose rand node from dst's default rendezvous nodes that is not currently in use
      *       rs += whatever we chose; F += whatever we chose
      *       // CHANGES END
      *     else
@@ -1353,201 +1378,171 @@ public class NeuRonNode extends Thread {
      */
     private ArrayList<NodeState> getAllRendezvousServers() {
 
-        // first, prepare the rowmap and colmap so that we can share/reuse
+        NodeState self = nodes.get(myNid);
+        HashSet<NodeState> currentRSs = new HashSet<NodeState>();
+        HashSet<NodeState> allDefaults = nodeDefaultRSs.get(self);
+
+        // first, prepare currentRS so that we can share/reuse
         // rendezvous servers
-
-        Hashtable<Integer, HashSet<NodeState>> colmap = new Hashtable<Integer, HashSet<NodeState>>();
-        Hashtable<Integer, HashSet<NodeState>> rowmap = new Hashtable<Integer, HashSet<NodeState>>();
-        HashSet<NodeState> allDefaults = new HashSet<NodeState>();
-
-        for (HashSet<NodeState> d : defaultRendezvousServers.values()) {
-            allDefaults.addAll(d);
-        }
-
-        for (int r = 0; r < numRows; r++) {
-            rowmap.put(r, new HashSet<NodeState>());
-        }
-        for (int c = 0; c < numCols; c++) {
-            colmap.put(c, new HashSet<NodeState>());
-        }
-
-        for (int r = 0; r < numRows; r++) {
-            for (int c = 0; c < numCols; c++) {
-                for (NodeState n : rendezvousServers.get(grid[r][c].info.id)) {
-                    // if this is an actual failover
-                    if (!allDefaults.contains(n)) {
-                        // n will be in either row r or column c, not both
-                        rowmap.get(gridRow.get(n)).add(n);
-                        colmap.get(gridColumn.get(n)).add(n);
-                    }
-                }
-            }
-        }
+        for (NodeState node : otherNodes) {
+	    for (NodeState n : rendezvousServers.get(node.info.id)) {
+		// if this is an actual failover
+		if (!allDefaults.contains(n))
+		    currentRSs.add(n);
+	    }
+	}
 
         // these are the rendezvous servers that we want to sent our
         // measurements to
         HashSet<NodeState> servers = new HashSet<NodeState>();
-        NodeState self = nodes.get(myNid);
-        for (int r0 = 0; r0 < numRows; r0++) {
-            for (int c0 = 0; c0 < numCols; c0++) {
-                NodeState dst = grid[r0][c0];
 
-                // if dst is not us and we believe that the node is not down
-                if (dst != self && dst.hop != 0 &&
-                        !(dst.info.id == grid[0][0].info.id && r0 != 0 && c0 != 0)) {
-                    // this is our current (active) set of rendezvous servers
-                    HashSet<NodeState> rs = rendezvousServers.get(dst.info.id);
+	// iterate over all destination nodes that are not us
+        for (NodeState dst : otherNodes) {
 
-                    // check if any of our default rendezvous servers are once
-                    // more available; if so, add them back
-                    HashSet<NodeState> defaults = defaultRendezvousServers.get(dst.info.id);
+	    // if we believe that the node is not down
+	    if (dst.hop != 0) {
+		// this is our current (active) set of rendezvous servers
+		HashSet<NodeState> rs = rendezvousServers.get(dst.info.id);
 
-                    // we always want to try talking to our default rendezvous
-                    // servers if we think they're reachable
-                    for (NodeState r : defaults)
-                        if (r.isReachable)
-                            servers.add(r);
+		// check if any of our default rendezvous servers are once
+		// more available; if so, add them back
+		HashSet<NodeState> defaults = defaultRendezvousServers.get(dst.info.id);
+		
+		// we always want to try talking to our default rendezvous
+		// servers if we think they're reachable
+		for (NodeState r : defaults)
+		    if (r.isReachable)
+			servers.add(r);
 
-                    // rs consists of either default rendezvous servers or
-                    // non-default rendezvous, but never a mix of both; test
-                    // which type it is
-                    boolean hasDefaultsOnly = rs.isEmpty() ?
-                        true : defaults.contains(rs.iterator().next());
+		// rs consists of either default rendezvous servers or
+		// non-default rendezvous, but never a mix of both; test
+		// which type it is
+		boolean hasDefaultsOnly = rs.isEmpty() ?
+		    true : defaults.contains(rs.iterator().next());
 
-                    // the following code attempts to add default rendezvous
-                    // servers back into rs
-                    HashSet<NodeState> old = new HashSet<NodeState>(rs);
-                    if (hasDefaultsOnly) {
-                        // if any default rendezvous servers are in use, then
-                        // don't clear rs; simply add any more default servers
-                        // that are working
-                        if (!defaults.equals(rs))
-                            for (NodeState r : defaults)
-                                if (!isFailedRendezvous(r, dst))
-                                    rs.add(r);
-                    } else {
-                        // if no default rendezvous servers are in use, then
-                        // try adding any that are working; if any are working,
-                        // we make sure to first clear rs
-                        boolean cleared = false;
-                        for (NodeState r : defaults) {
-                            if (!isFailedRendezvous(r, dst)) {
-                                if (!cleared) {
-                                    rs.clear();
-                                    cleared = true;
-                                }
-                                rs.add(r);
-                            }
-                        }
-                    }
-                    if (!old.equals(rs)) {
-                        log("restored rendezvous server for " + dst + " from " + old + " to " + rs);
-                    }
+		// the following code attempts to add default rendezvous
+		// servers back into rs
+		HashSet<NodeState> old = new HashSet<NodeState>(rs);
+		if (hasDefaultsOnly) {
+		    // if any default rendezvous servers are in use, then
+		    // don't clear rs; simply add any more default servers
+		    // that are working
+		    if (!defaults.equals(rs))
+			for (NodeState r : defaults)
+			    if (!isFailedRendezvous(r, dst))
+				rs.add(r);
+		} else {
+		    // if no default rendezvous servers are in use, then
+		    // try adding any that are working; if any are working,
+		    // we make sure to first clear rs
+		    boolean cleared = false;
+		    for (NodeState r : defaults) {
+			if (!isFailedRendezvous(r, dst)) {
+			    if (!cleared) {
+				rs.clear();
+				cleared = true;
+			    }
+			    rs.add(r);
+			}
+		    }
+		}
+		if (!old.equals(rs)) {
+		    log("restored rendezvous server for " + dst + " from " + old + " to " + rs);
+		}
 
-                    if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
-                        // create debug string
-                        String s = "defaults";
-                        for (NodeState r : defaults) {
-                            s += " " + r.info.id + (
-                                    !r.isReachable ? " unreachable" :
-                                    " <-/-> " + mkString(r.remoteFailures, ",") );
-                        }
-                        final String report = s;
+		if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
+		    // create debug string
+		    String s = "defaults";
+		    for (NodeState r : defaults) {
+			s += " " + r.info.id + (
+						!r.isReachable ? " unreachable" :
+						" <-/-> " + mkString(r.remoteFailures, ",") );
+		    }
+		    final String report = s;
 
-                        // look for failovers
+		    // look for failovers
 
-                        HashSet<NodeState> cands = new HashSet<NodeState>();
+		    HashSet<NodeState> cands = new HashSet<NodeState>();
 
-                        // first, start by looking at the failovers that are
-                        // currently in use for this col/row, so that we can
-                        // share when possible. that is, if we know that a
-                        // failover works for a destination, keep using it.
+		    // first, start by looking at the failovers that are
+		    // currently in use which are default rs's for this dst, so
+		    // that we can share when possible. that is, if we know that a
+		    // failover works for a destination, keep using it.
 
-                        HashSet<NodeState> colrowFailovers = new HashSet<NodeState>();
-                        colrowFailovers.addAll(rowmap.get(r0));
-                        colrowFailovers.addAll(colmap.get(c0));
-                        for (NodeState f : colrowFailovers) {
-                            if (!isFailedRendezvous(f, dst)) {
-                                cands.add(f);
-                            }
-                        }
+		    HashSet<NodeState> colrowFailovers = new HashSet<NodeState>();
+		    HashSet<NodeState> dstDefault = nodeDefaultRSs.get(dst);
 
-                        if (cands.isEmpty()) {
+		    for(NodeState f : currentRSs) {
+			if (dstDefault.contains(f) && !isFailedRendezvous(f, dst)) {
+			    cands.add(f);
+			}
+		    }
 
-                            // only once we have determined that no current
-                            // failover works for us do we go ahead and randomly
-                            // select a new failover. this is a blind choice;
-                            // we don't have these node's routing recommendations,
-                            // so we could not hope to do better.
+		    if (cands.isEmpty()) {
 
-                            // get candidates from col
-                            for (int r1 = 0; r1 < numRows; r1++) {
-                                NodeState cand = grid[r1][c0];
-                                if (cand != self && cand.isReachable)
-                                    cands.add(cand);
-                            }
+			// only once we have determined that no current
+			// failover works for us do we go ahead and randomly
+			// select a new failover. this is a blind choice;
+			// we don't have these node's routing recommendations,
+			// so we could not hope to do better.
 
-                            // get candidates from row
-                            for (int c1 = 0; c1 < numCols; c1++) {
-                                NodeState cand = grid[r0][c1];
-                                if (cand != self && cand.isReachable)
-                                    cands.add(cand);
-                            }
-                        }
+			for(NodeState cand : dstDefault) {
+			    if (cand != self && cand.isReachable)
+				cands.add(cand);
+			}
+		    }
 
-                        // if any of the candidates are already selected to be in
-                        // 'servers', we want to make sure that we only choose from
-                        // these choices.
-                        HashSet<NodeState> candsInServers = new HashSet<NodeState>();
-                        for (NodeState cand : cands)
-                            if (servers.contains(cand))
-                                candsInServers.add(cand);
+		    // if any of the candidates are already selected to be in
+		    // 'servers', we want to make sure that we only choose from
+		    // these choices.
+		    HashSet<NodeState> candsInServers = new HashSet<NodeState>();
+		    for (NodeState cand : cands)
+			if (servers.contains(cand))
+			    candsInServers.add(cand);
 
-                        // choose candidate uniformly at random
-                        ArrayList<NodeState> candsList = new
-                            ArrayList<NodeState>(candsInServers.isEmpty() ?
-                                    cands : candsInServers);
-                        if (candsList.size() == 0) {
-                            log("no failover candidates! giving up; " + report);
-                        } else {
-                            NodeState failover = candsList.get(rand.nextInt(candsList.size()));
-                            log("new failover for " + dst + ": " + failover + ", prev rs = " + rs + "; " + report);
-                            rs.add(failover);
-                            servers.add(failover);
+		    // choose candidate uniformly at random
+		    ArrayList<NodeState> candsList = new
+			ArrayList<NodeState>(candsInServers.isEmpty() ?
+					     cands : candsInServers);
+		    if (candsList.size() == 0) {
+			log("no failover candidates! giving up; " + report);
+		    } else {
+			NodeState failover = candsList.get(rand.nextInt(candsList.size()));
+			log("new failover for " + dst + ": " + failover + ", prev rs = " + rs + "; " + report);
+			rs.add(failover);
+			servers.add(failover);
 
-                            // share this failover in this routing iteration too
-                            if (!allDefaults.contains(failover)) {
-                                rowmap.get(gridRow.get(failover)).add(failover);
-                                colmap.get(gridColumn.get(failover)).add(failover);
-                            }
-                        }
-                    } else {
-                        /*
-                         * when we remove nodes now, don't immediately look
-                         * for failovers. the next period, we will have
-                         * received link states from our neighbors, from
-                         * which we can determine whether dst is just down.
-                         *
-                         * the reason for this is that if a node fails, we
-                         * don't want the entire network to flood the row/col
-                         * of that downed node (no need for failovers period)
-                         */
-                        for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
-                            NodeState r = i.next();
-                            if (isFailedRendezvous(r, dst)) {
-                                i.remove();
-                            } else {
-                                servers.add(r);
-                            }
-                        }
+			// share this failover in this routing iteration too
+			if (!allDefaults.contains(failover)) {
+			    currentRSs.add(failover);
+			}
+		    }
+		} else {
+		    /*
+		     * when we remove nodes now, don't immediately look
+		     * for failovers. the next period, we will have
+		     * received link states from our neighbors, from
+		     * which we can determine whether dst is just down.
+		     *
+		     * the reason for this is that if a node fails, we
+		     * don't want the entire network to flood the row/col
+		     * of that downed node (no need for failovers period)
+		     */
+		    for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
+			NodeState r = i.next();
+			if (isFailedRendezvous(r, dst)) {
+			    i.remove();
+			} else {
+			    servers.add(r);
+			}
+		    }
 
-                        if (rs.isEmpty()) {
-                            log("all rs to " + dst + " failed");
-                            System.out.println("ALL FAILED!");
-                        }
-                    }
-                }
-            }
+		    if (rs.isEmpty()) {
+			log("all rs to " + dst + " failed");
+			System.out.println("ALL FAILED!");
+		    }
+		}
+	    }
         }
         ArrayList<NodeState> list = new ArrayList<NodeState>(servers);
         Collections.sort(list);
@@ -1825,23 +1820,24 @@ public class NeuRonNode extends Thread {
             }
         }
 
-        if (scheme != RoutingScheme.SQRT_SPECIAL) {
-            /*
-             * get the full set of dsts that we depend on this node for. note
-             * that the set of nodes it's actually serving may be different.
-             */
-            for (NodeState dst : r.defaultClients) {
-                if (!r.dstsPresent.contains(dst.info.id)) {
-                    /*
-                     * there was a comm failure between this rendezvous and the
-                     * dst for which this rendezvous did not provide a
-                     * recommendation. consider this a rendezvous failure, so that if
-                     * necessary during the next phase, we will find failovers.
-                     */
-                    r.remoteFailures.add(dst);
-                }
-            }
-        }
+	// This code is no longer operational. Not yet deleted in case we need similar soon.
+	//	if (scheme != RoutingScheme.SQRT_SPECIAL) {
+	//            /*
+	//             * get the full set of dsts that we depend on this node for. note
+	//             * that the set of nodes it's actually serving may be different.
+	//             */
+	//            for (NodeState dst : r.defaultClients) {
+	//                if (!r.dstsPresent.contains(dst.info.id)) {
+	//                    /*
+	//                     * there was a comm failure between this rendezvous and the
+	//                     * dst for which this rendezvous did not provide a
+	//                     * recommendation. consider this a rendezvous failure, so that if
+	//                     * necessary during the next phase, we will find failovers.
+	//                     */
+	//                    r.remoteFailures.add(dst);
+	//                }
+	//            }
+	//        }
     }
 
     /**
@@ -2058,10 +2054,11 @@ public class NeuRonNode extends Thread {
          */
         public final HashSet<Short> dstsPresent = new HashSet<Short>();
 
-        /**
-         * basically, his row/col. (all the nodes that he's responsible for).
-         */
-        public final HashSet<NodeState> defaultClients = new HashSet<NodeState>();
+	// This code is no longer operational. Not yet deleted in case we need similar soon.
+	//        /**
+	//         * basically, his row/col. (all the nodes that he's responsible for).
+	//         */
+	//        public final HashSet<NodeState> defaultClients = new HashSet<NodeState>();
 
         /**
          * this is unused at the moment. still need to re-design.
