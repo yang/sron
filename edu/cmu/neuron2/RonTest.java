@@ -160,8 +160,7 @@ public class RonTest {
                         for (NeuRonNode node : nodes) {
                             if (node.myNid == src) {
                                 node.ignore(dst);
-                            }
-                            else if (node.myNid == dst) {
+                            } else if (node.myNid == dst) {
                                 node.ignore(src);
                             }
                         }

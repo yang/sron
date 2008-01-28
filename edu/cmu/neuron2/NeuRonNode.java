@@ -159,8 +159,12 @@ public class NeuRonNode extends Thread {
 
     private final ArrayList<NodeState> lastRendezvousServers = new ArrayList<NodeState>();
 
+    private final double directBonus, hysteresisBonus;
+
     // TODO discard
     private final HashSet<NodeState> allDefaultServers = new HashSet<NodeState>();
+
+    private final long startTime = System.currentTimeMillis();
 
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
@@ -228,7 +232,28 @@ public class NeuRonNode extends Thread {
         linkTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + membershipTimeout));
         scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SQRT").toUpperCase());
 
+        // Events are when simulated latencies change; these are substituted in
+        // for real measured latencies, and can be useful in simulation. These
+        // events must be specified in time order! To remove any sim latency
+        // for a dst, set it to resetLatency.
+        String simEventsSpec = props.getProperty("simEvents", "");
+        if (!simEventsSpec.equals("")) {
+            String[] events = simEventsSpec.split(";");
+            for (String e : events) {
+                String[] parts = e.split(" ");
+                int secs = Integer.parseInt(parts[0]);
+                short oid = Short.parseShort(parts[1]);
+                if (oid == myNid) {
+                    short dst = Short.parseShort(parts[2]);
+                    short lat = Short.parseShort(parts[3]);
+                    simEvents.addLast(new SimEvent(secs, oid, dst, lat));
+                }
+            }
+        }
+
         smoothingFactor = Double.parseDouble(props.getProperty("smoothingFactor", "0.1"));
+        directBonus = Double.parseDouble(props.getProperty("directBonus", "1.05"));
+        hysteresisBonus = Double.parseDouble(props.getProperty("hysteresisBonus", "1.05"));
 
         Formatter minfmt = new Formatter() {
             public String format(LogRecord record) {
@@ -347,6 +372,20 @@ public class NeuRonNode extends Thread {
     private void log(String name, Object value) {
         Logger.getLogger(logger.getName() + "." + name).info(value.toString());
     }
+
+    public static final class SimEvent {
+        public int secs;
+        public short oid, dst, lat;
+        public SimEvent(int secs, short src, short dst, short lat) {
+            this.secs = secs;
+            this.oid = oid;
+            this.dst = dst;
+            this.lat = lat;
+        }
+    }
+
+    public final ArrayDeque<SimEvent> simEvents = new ArrayDeque<SimEvent>();
+    public final ShortShortMap simLatencies = new ShortShortMap(resetLatency);
 
     public static final class PlannedException extends RuntimeException {
         public PlannedException(String msg) {
@@ -763,6 +802,17 @@ public class NeuRonNode extends Thread {
             super.sessionOpened(session);
         }
 
+        public short getSimLatency(short nid) {
+            long time = System.currentTimeMillis();
+            for (SimEvent e : simEvents) {
+                if (time - startTime >= e.secs * 1000) {
+                    // make this event happen
+                    simLatencies.put(e.dst, e.lat);
+                }
+            }
+            return simLatencies.get(nid);
+        }
+
         @Override
         public void messageReceived(IoSession session, Object obj)
                 throws Exception {
@@ -787,6 +837,12 @@ public class NeuRonNode extends Thread {
                         } else if (msg instanceof Pong) {
                             Pong pong = (Pong) msg;
                             long rawRtt = System.currentTimeMillis() - pong.time;
+                            if (mode == RunMode.SIM) {
+                                short l = getSimLatency(msg.src);
+                                if (l < resetLatency) {
+                                    rawRtt = 2 * l;
+                                }
+                            }
                             // if the rtt was astronomical, just treat it as a dropped packet
                             if (rawRtt / 2 < Short.MAX_VALUE) {
                                 // we define "latency" as rtt/2; this should be
@@ -1106,15 +1162,15 @@ public class NeuRonNode extends Thread {
         numCols = (short) Math.ceil(Math.sqrt(nodes.size()));
         numRows = (short) Math.ceil((double) nodes.size() / (double) numCols);
         grid = new NodeState[numRows][numCols];
-	gridRow.clear();
-	gridColumn.clear();
+        gridRow.clear();
+        gridColumn.clear();
         List<Short> nids = memberNids;
         for (short i = 0, r = 0; r < numRows; r++)
             for (short c = 0; c < numCols; c++) {
-		grid[r][c] = nodes.get(nids.get(i++ % nids.size()));
-		gridRow.put(grid[r][c], r);
-		gridColumn.put(grid[r][c], c);
-	    }
+                grid[r][c] = nodes.get(nids.get(i++ % nids.size()));
+                gridRow.put(grid[r][c], r);
+                gridColumn.put(grid[r][c], c);
+            }
 
         /*
          * simply forget about all our neighbors. thus, this forgets all our
@@ -1131,72 +1187,72 @@ public class NeuRonNode extends Thread {
          */
         rendezvousClients.clear();
         defaultRendezvousServers.clear();
-	int rz = gridRow.get(self);
-	int cz = gridColumn.get(self);
-	HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
-	HashSet<NodeState> rendezvousClientCol = new HashSet<NodeState>();
-	// add this column and row as clients
-	for (int r1 = 0; r1 < numRows; r1++) {
-	    NodeState cli = grid[r1][cz];
-	    if (cli.isReachable && cli != self)
-		rendezvousClientCol.add(cli);
-	}
-	for (int c1 = 0; c1 < numCols; c1++) {
-	    NodeState cli = grid[rz][c1];
-	    if (cli.isReachable && cli != self)
-		rendezvousClientRow.add(cli);
-	}
-
-	rendezvousClients.addAll(rendezvousClientRow);
-	rendezvousClients.addAll(rendezvousClientCol);
-
-	// Put timeouts for all new rendezvous clients. If they can never
-	// reach us, we should stop sending them recommendations.
-        for (final NodeState clientNode : rendezvousClients) {
-	    ScheduledFuture<?> oldFuture = rendezvousClientTimeouts.get(clientNode.info.id);
-	    if (oldFuture != null) {
-		oldFuture.cancel(false);
-	    }
-	    ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
-		    public void run() {
-			if (rendezvousClients.remove(clientNode)) {
-			    log("rendezvous client " + clientNode + " removed");
-			}
-		    }
-		}), clientTimeout, TimeUnit.SECONDS);
-	    rendezvousClientTimeouts.put(clientNode.info.id, future);
+        int rz = gridRow.get(self);
+        int cz = gridColumn.get(self);
+        HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
+        HashSet<NodeState> rendezvousClientCol = new HashSet<NodeState>();
+        // add this column and row as clients
+        for (int r1 = 0; r1 < numRows; r1++) {
+            NodeState cli = grid[r1][cz];
+            if (cli.isReachable && cli != self)
+                rendezvousClientCol.add(cli);
+        }
+        for (int c1 = 0; c1 < numCols; c1++) {
+            NodeState cli = grid[rz][c1];
+            if (cli.isReachable && cli != self)
+                rendezvousClientRow.add(cli);
         }
 
-	// add the rendezvous servers to all nodes
-	for (int r0 = 0; r0 < numRows; r0++) {
-	    for (int c0 = 0; c0 < numCols; c0++) {
-		NodeState dst = grid[r0][c0];
-		HashSet<NodeState> rs = defaultRendezvousServers.get(dst.info.id);
-		if (rs == null) {
-		    rs = new HashSet<NodeState>();
-		    defaultRendezvousServers.put(dst.info.id, rs);
-		}
-		if (r0 != rz && c0 != cz) {
-		    // normally, add the pairs
-		    if (self != grid[rz][c0])
-			rs.add(grid[rz][c0]);
-		    if (self != grid[r0][cz])
-			rs.add(grid[r0][cz]);
-		} else if (c0 == cz) {
-		    /*
-		     * if this is in our col (a neighbor), everyone
-		     * else in that col is in essence a rendezvous
-		     * server between us two
-		     */
-		    rs.addAll(rendezvousClientCol);
-		} else if (r0 == rz) {
-		    /*
-		     * ditto for rows
-		     */
-		    rs.addAll(rendezvousClientRow);
-		}
-	    }
-	}
+        rendezvousClients.addAll(rendezvousClientRow);
+        rendezvousClients.addAll(rendezvousClientCol);
+
+        // Put timeouts for all new rendezvous clients. If they can never
+        // reach us, we should stop sending them recommendations.
+        for (final NodeState clientNode : rendezvousClients) {
+            ScheduledFuture<?> oldFuture = rendezvousClientTimeouts.get(clientNode.info.id);
+            if (oldFuture != null) {
+                oldFuture.cancel(false);
+            }
+            ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
+                public void run() {
+                    if (rendezvousClients.remove(clientNode)) {
+                        log("rendezvous client " + clientNode + " removed");
+                    }
+                }
+            }), clientTimeout, TimeUnit.SECONDS);
+            rendezvousClientTimeouts.put(clientNode.info.id, future);
+        }
+
+        // add the rendezvous servers to all nodes
+        for (int r0 = 0; r0 < numRows; r0++) {
+            for (int c0 = 0; c0 < numCols; c0++) {
+                NodeState dst = grid[r0][c0];
+                HashSet<NodeState> rs = defaultRendezvousServers.get(dst.info.id);
+                if (rs == null) {
+                    rs = new HashSet<NodeState>();
+                    defaultRendezvousServers.put(dst.info.id, rs);
+                }
+                if (r0 != rz && c0 != cz) {
+                    // normally, add the pairs
+                    if (self != grid[rz][c0])
+                        rs.add(grid[rz][c0]);
+                    if (self != grid[r0][cz])
+                        rs.add(grid[r0][cz]);
+                } else if (c0 == cz) {
+                    /*
+                     * if this is in our col (a neighbor), everyone
+                     * else in that col is in essence a rendezvous
+                     * server between us two
+                     */
+                    rs.addAll(rendezvousClientCol);
+                } else if (r0 == rz) {
+                    /*
+                     * ditto for rows
+                     */
+                    rs.addAll(rendezvousClientRow);
+                }
+            }
+        }
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
@@ -1320,7 +1376,7 @@ public class NeuRonNode extends Thread {
                 for (NodeState n : rendezvousServers.get(grid[r][c].info.id)) {
                     // if this is an actual failover
                     if (!allDefaults.contains(n)) {
-			// n will be in either row r or column c, not both
+                        // n will be in either row r or column c, not both
                         rowmap.get(gridRow.get(n)).add(n);
                         colmap.get(gridColumn.get(n)).add(n);
                     }
@@ -1459,10 +1515,10 @@ public class NeuRonNode extends Thread {
                             rs.add(failover);
                             servers.add(failover);
 
-			    // share this failover in this routing iteration too
+                            // share this failover in this routing iteration too
                             if (!allDefaults.contains(failover)) {
-				rowmap.get(gridRow.get(failover)).add(failover);
-				colmap.get(gridColumn.get(failover)).add(failover);
+                                rowmap.get(gridRow.get(failover)).add(failover);
+                                colmap.get(gridColumn.get(failover)).add(failover);
                             }
                         }
                     } else {
@@ -1612,13 +1668,26 @@ public class NeuRonNode extends Thread {
                 // would guarantee (or there was a failure, and eventually one
                 // of {src,dst} will fall out of our client set).
                 if (minhop != -1) {
-                    // DEBUG
-                    // log("recommending " + src + "->" + minhop + "->" + dst +
-                    //         " latency " + min);
+                    short directLatency = src.latencies.get(dst.info.id);
                     Rec rec = new Rec();
                     rec.dst = dst.info.id;
-                    rec.via = minhop;
-                    recs.add(rec);
+                    // We require that a recommended route (if not the direct
+                    // route and if direct route is working) yield at least a
+                    // 5% reduction in latency.
+                    if (minhop == src.info.id ||
+                            directLatency == resetLatency ||
+                            min * directBonus < directLatency) {
+                        rec.via = minhop;
+                        recs.add(rec);
+                    } else {
+                        // At this point,
+                        //   minhop != src.info.id &&
+                        //     src->dst is infinite &&
+                        //     src->dst * directBonus <= min
+                        // So, recommend the direct route, if that is working.
+                        rec.via = dst.info.id;
+                        recs.add(rec);
+                    }
                 }
             }
         }
