@@ -1320,8 +1320,9 @@ public class NeuRonNode extends Thread {
                 for (NodeState n : rendezvousServers.get(grid[r][c].info.id)) {
                     // if this is an actual failover
                     if (!allDefaults.contains(n)) {
-                        rowmap.get(r).add(n);
-                        colmap.get(c).add(n);
+			// n will be in either row r or column c, not both
+                        rowmap.get(gridRow.get(n)).add(n);
+                        colmap.get(gridColumn.get(n)).add(n);
                     }
                 }
             }
@@ -1460,8 +1461,8 @@ public class NeuRonNode extends Thread {
 
 			    // share this failover in this routing iteration too
                             if (!allDefaults.contains(failover)) {
-                                rowmap.get(r0).add(failover);
-                                colmap.get(c0).add(failover);
+				rowmap.get(gridRow.get(failover)).add(failover);
+				colmap.get(gridColumn.get(failover)).add(failover);
                             }
                         }
                     } else {
