@@ -100,6 +100,8 @@ public class NeuRonNode extends Thread {
     private final SortedSet<NodeState> rendezvousClients = new TreeSet<NodeState>();
 
     private NodeState[][] grid;
+    private Hashtable<NodeState, Short> gridRow = new Hashtable<NodeState, Short>();
+    private Hashtable<NodeState, Short> gridColumn = new Hashtable<NodeState, Short>();
     private short numCols, numRows;
 
     private final Hashtable<InetAddress, Short> addr2id = new Hashtable<InetAddress, Short>();
@@ -1104,10 +1106,15 @@ public class NeuRonNode extends Thread {
         numCols = (short) Math.ceil(Math.sqrt(nodes.size()));
         numRows = (short) Math.ceil((double) nodes.size() / (double) numCols);
         grid = new NodeState[numRows][numCols];
+	gridRow.clear();
+	gridColumn.clear();
         List<Short> nids = memberNids;
         for (short i = 0, r = 0; r < numRows; r++)
-            for (short c = 0; c < numCols; c++)
-                grid[r][c] = nodes.get(nids.get(i++ % nids.size()));
+            for (short c = 0; c < numCols; c++) {
+		grid[r][c] = nodes.get(nids.get(i++ % nids.size()));
+		gridRow.put(grid[r][c], r);
+		gridColumn.put(grid[r][c], c);
+	    }
 
         /*
          * simply forget about all our neighbors. thus, this forgets all our
@@ -1124,58 +1131,72 @@ public class NeuRonNode extends Thread {
          */
         rendezvousClients.clear();
         defaultRendezvousServers.clear();
-        for (int rz = 0; rz < numRows; rz++) {
-            for (int cz = 0; cz < numCols; cz++) {
-                if (grid[rz][cz] == self) {
-                    HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
-                    HashSet<NodeState> rendezvousClientCol = new HashSet<NodeState>();
-                    // add this column and row as clients
-                    for (int r1 = 0; r1 < numRows; r1++) {
-                        NodeState cli = grid[r1][cz];
-                        if (cli.isReachable && cli != self)
-                            rendezvousClientCol.add(cli);
-                    }
-                    for (int c1 = 0; c1 < numCols; c1++) {
-                        NodeState cli = grid[rz][c1];
-                        if (cli.isReachable && cli != self)
-                            rendezvousClientRow.add(cli);
-                    }
-                    rendezvousClients.addAll(rendezvousClientRow);
-                    rendezvousClients.addAll(rendezvousClientCol);
+	int rz = gridRow.get(self);
+	int cz = gridColumn.get(self);
+	HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
+	HashSet<NodeState> rendezvousClientCol = new HashSet<NodeState>();
+	// add this column and row as clients
+	for (int r1 = 0; r1 < numRows; r1++) {
+	    NodeState cli = grid[r1][cz];
+	    if (cli.isReachable && cli != self)
+		rendezvousClientCol.add(cli);
+	}
+	for (int c1 = 0; c1 < numCols; c1++) {
+	    NodeState cli = grid[rz][c1];
+	    if (cli.isReachable && cli != self)
+		rendezvousClientRow.add(cli);
+	}
 
-                    // add the rendezvous servers to all nodes
-                    for (int r0 = 0; r0 < numRows; r0++) {
-                        for (int c0 = 0; c0 < numCols; c0++) {
-                            NodeState dst = grid[r0][c0];
-                            HashSet<NodeState> rs = defaultRendezvousServers.get(dst.info.id);
-                            if (rs == null) {
-                                rs = new HashSet<NodeState>();
-                                defaultRendezvousServers.put(dst.info.id, rs);
-                            }
-                            if (r0 != rz && c0 != cz) {
-                                // normally, add the pairs
-                                if (self != grid[rz][c0])
-                                    rs.add(grid[rz][c0]);
-                                if (self != grid[r0][cz])
-                                    rs.add(grid[r0][cz]);
-                            } else if (c0 == cz) {
-                                /*
-                                 * if this is in our col (a neighbor), everyone
-                                 * else in that col is in essence a rendezvous
-                                 * server between us two
-                                 */
-                                rs.addAll(rendezvousClientCol);
-                            } else if (r0 == rz) {
-                                /*
-                                 * ditto for rows
-                                 */
-                                rs.addAll(rendezvousClientRow);
-                            }
-                        }
-                    }
-                }
-            }
+	rendezvousClients.addAll(rendezvousClientRow);
+	rendezvousClients.addAll(rendezvousClientCol);
+
+	// Put timeouts for all new rendezvous clients. If they can never
+	// reach us, we should stop sending them recommendations.
+        for (final NodeState clientNode : rendezvousClients) {
+	    ScheduledFuture<?> oldFuture = rendezvousClientTimeouts.get(clientNode.info.id);
+	    if (oldFuture != null) {
+		oldFuture.cancel(false);
+	    }
+	    ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
+		    public void run() {
+			if (rendezvousClients.remove(clientNode)) {
+			    log("rendezvous client " + clientNode + " removed");
+			}
+		    }
+		}), clientTimeout, TimeUnit.SECONDS);
+	    rendezvousClientTimeouts.put(clientNode.info.id, future);
         }
+
+	// add the rendezvous servers to all nodes
+	for (int r0 = 0; r0 < numRows; r0++) {
+	    for (int c0 = 0; c0 < numCols; c0++) {
+		NodeState dst = grid[r0][c0];
+		HashSet<NodeState> rs = defaultRendezvousServers.get(dst.info.id);
+		if (rs == null) {
+		    rs = new HashSet<NodeState>();
+		    defaultRendezvousServers.put(dst.info.id, rs);
+		}
+		if (r0 != rz && c0 != cz) {
+		    // normally, add the pairs
+		    if (self != grid[rz][c0])
+			rs.add(grid[rz][c0]);
+		    if (self != grid[r0][cz])
+			rs.add(grid[r0][cz]);
+		} else if (c0 == cz) {
+		    /*
+		     * if this is in our col (a neighbor), everyone
+		     * else in that col is in essence a rendezvous
+		     * server between us two
+		     */
+		    rs.addAll(rendezvousClientCol);
+		} else if (r0 == rz) {
+		    /*
+		     * ditto for rows
+		     */
+		    rs.addAll(rendezvousClientRow);
+		}
+	    }
+	}
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
