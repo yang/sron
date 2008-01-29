@@ -139,6 +139,12 @@ public class NeuRonNode extends Thread {
     private final boolean enableSubpings;
     private final int subpingPeriod; // seconds
 
+    // number of intervals which we'll split the probing time into
+    private int numProbeIntervals;
+
+    private Set[] pingTable;
+    private final Hashtable<NodeState, Integer> pingId = new Hashtable<NodeState, Integer>();
+
     private final int dumpPeriod;
 
     private final FileHandler fh;
@@ -432,6 +438,19 @@ public class NeuRonNode extends Thread {
             }
         }, initialDelay, TimeUnit.SECONDS);
     }
+    private ScheduledFuture<?> safeScheduleMs(final Runnable r, long initialDelay, final long period) {
+        final long bufferTime = 1000; // TODO parameterize
+        return scheduler.schedule(new Runnable() {
+            private long scheduledTime = -1;
+            public void run() {
+                if (scheduledTime < 0) scheduledTime = System.currentTimeMillis();
+                r.run();
+                long now = System.currentTimeMillis();
+                scheduledTime = Math.max(scheduledTime + period, now + bufferTime);
+                scheduler.schedule(this, scheduledTime - now, TimeUnit.MILLISECONDS);
+            }
+        }, initialDelay, TimeUnit.MILLISECONDS);
+    }
 
     private boolean hasJoined = false;
     
@@ -458,13 +477,26 @@ public class NeuRonNode extends Thread {
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
-                safeSchedule(safeRun(new Runnable() {
-                    public void run() {
-                        if (hasJoined) {
-                            pingAll();
-                        }
-                    }
-                }), 1, probePeriod);
+		// Split up the probing period into many small intervals. In each
+		// interval we will ping a small fraction of the nodes.
+
+		numProbeIntervals =  numNodesHint / 3;
+		pingTable = new HashSet[numProbeIntervals];
+		for(int i=0; i<numProbeIntervals; i++)
+		    pingTable[i] = new HashSet();
+
+		int probeSubPeriod = (1000 * probePeriod) / numProbeIntervals;
+		
+                safeScheduleMs(safeRun(new Runnable() {
+			int pingIter = 0;
+
+			public void run() {
+			    if (hasJoined) {
+				pingAll(pingIter);
+				pingIter = (pingIter + 1) % numProbeIntervals;
+			    }
+			}
+                }), 1234, probeSubPeriod);
 
                 safeSchedule(safeRun(new Runnable() {
                     public void run() {
@@ -492,11 +524,19 @@ public class NeuRonNode extends Thread {
                 }), 7, neighborBroadcastPeriod);
 
                 if (enableSubpings) {
-                    safeSchedule(safeRun(new Runnable() {
-                        public void run() {
-                            subping();
-                        }
-                    }), 5, subpingPeriod);
+		    int subpingSubPeriod = (1000 * subpingPeriod) / numProbeIntervals;
+
+                    safeScheduleMs(safeRun(new Runnable() {
+
+			    int pingIter = 0;
+
+			    public void run() {
+				if(hasJoined) {
+				    subping(pingIter);
+				    pingIter = (pingIter + 1) % numProbeIntervals;
+				}
+			    }
+			}), 5521, subpingSubPeriod);
                     // TODO should these initial offsets be constants?
                 }
 
@@ -569,20 +609,26 @@ public class NeuRonNode extends Thread {
         return p;
     }
 
-    private void subping() {
-        Set<Map.Entry<Short,NodeState>> entries = nodes.entrySet();
-        List<Short> nids = new ArrayList<Short>();
-        int bytes = 0;
-        for (Map.Entry<Short,NodeState> entry : entries) {
-            short nid = entry.getKey();
-            short hop = entry.getValue().hop;
-            long time = System.currentTimeMillis();
-            if (nid != myNid && hop != 0) {
-                bytes += sendObject(subprobe(nid, time, SUBPING), hop);
-                nids.add(nid);
-            }
-        }
-        log("sent subpings " + bytes + " bytes, to " + nids);
+    private void subping(int pingIter) {
+
+	// We will only subping a fraction of the nodes at this iteration
+	// Note: this synch. statement is redundant until we remove global lock
+	synchronized(pingTable) {
+
+	    List<Short> nids = new ArrayList<Short>();
+	    int bytes = 0;
+	    for (Object node : pingTable[pingIter]) {
+		short nid = ((NodeState)node).info.id;
+		short hop = ((NodeState)node).hop;
+		long time = System.currentTimeMillis();
+		if (nid != myNid && hop != 0) {
+		    bytes += sendObject(subprobe(nid, time, SUBPING), hop);
+		    nids.add(nid);
+		}
+	    }
+
+	    log("sent subpings " + bytes + " bytes, to " + nids);
+	}
     }
 
     private void handleSubping(Subprobe p) {
@@ -617,29 +663,40 @@ public class NeuRonNode extends Thread {
         log("subpong from " + p.nid + " via " + p.src + ": " + latency + ", time " + p.time);
     }
 
-    private void pingAll() {
+    private void pingAll(int pingIter) {
         log("pinging");
-        Ping ping = new Ping();
-        ping.time = System.currentTimeMillis();
-        NodeInfo tmp = nodes.get(myNid).info;
-        ping.info = new NodeInfo();
-        ping.info.id = origNid; // note that the ping info uses the original id
-        ping.info.addr = tmp.addr;
-        ping.info.port = tmp.port;
-        for (short nid : nodes.keySet())
-            if (nid != myNid)
-                sendObject(ping, nid);
 
-        /* send ping to the membership server (co-ord) -
-           this might not be required if everone makes their own local decision.
-           i.e. each node notices that no other node can reach a node (say X),
-           then each node sends the co-ord a msg saying that "i think X is dead".
-           The sending of this msg can be staggered in time so that the co-ord is not flooded with mesgs.
-           The co-ordinator can then make a decision on keeping or removing node Y from the membership.
-           On seeing a subsequent msg from the co-ord that X has been removed from the overlay, if a node Y
-           has not sent its "i think X is dead" msg, it can cancel this event.
-        */
-        sendObject(ping, (short)0);
+	// We will only ping a fraction of the nodes at this iteration
+	// Note: this synch. statement is redundant until we remove global lock
+	synchronized(pingTable) {
+
+	    Ping ping = new Ping();
+	    ping.time = System.currentTimeMillis();
+	    NodeInfo tmp = nodes.get(myNid).info;
+	    ping.info = new NodeInfo();
+	    ping.info.id = origNid; // note that the ping info uses the original id
+	    ping.info.addr = tmp.addr;
+	    ping.info.port = tmp.port;
+	    for (Object node : pingTable[pingIter]) {
+		short nid = ((NodeState)node).info.id;
+		if (nid != myNid)
+		    sendObject(ping, nid);
+	    }
+
+	    /* send ping to the membership server (co-ord) -
+	       this might not be required if everone makes their own local decision.
+	       i.e. each node notices that no other node can reach a node (say X),
+	       then each node sends the co-ord a msg saying that "i think X is dead".
+	       The sending of this msg can be staggered in time so that the co-ord is not flooded with mesgs.
+	       The co-ordinator can then make a decision on keeping or removing node Y from the membership.
+	       On seeing a subsequent msg from the co-ord that X has been removed from the overlay, if a node Y
+	       has not sent its "i think X is dead" msg, it can cancel this event.
+	    */
+
+	    // Only ping the coordinator once per ping interval (not per subinterval)
+	    if(pingIter == 0)
+		sendObject(ping, (short)0);
+	}
     }
 
     private Msg deserialize(Object o) {
@@ -1105,26 +1162,49 @@ public class NeuRonNode extends Thread {
      */
     private void updateMembers(List<NodeInfo> newNodes) {
 
-        // add new nodes
+	HashSet<Short> newNids = new HashSet<Short>();
+	for (NodeInfo node : newNodes)
+	    newNids.add(node.id);
 
-        for (NodeInfo node : newNodes)
-            if (!nodes.containsKey(node.id)) {
-                nodes.put(node.id, new NodeState(node));
-                if (node.id != myNid)
-                    resetTimeoutAtNode(node.id);
-            }
 
-        // remove nodes
+	synchronized(pingTable) {
 
-        HashSet<Short> newNids = new HashSet<Short>();
-        for (NodeInfo node : newNodes)
-            newNids.add(node.id);
-        HashSet<Short> toRemove = new HashSet<Short>();
-        for (Short nid : nodes.keySet())
-            if (!newNids.contains(nid))
-                toRemove.add(nid);
-        for (Short nid : toRemove)
-            nodes.remove(nid);
+	    // add new nodes
+
+	    for (NodeInfo node : newNodes)
+		if (!nodes.containsKey(node.id)) {
+		
+		    NodeState newNode = new NodeState(node);
+
+		    // Choose a subinterval for this node during which we will ping it
+		    int loc = rand.nextInt(numProbeIntervals);
+		    pingTable[loc].add(newNode);
+		    pingId.put(newNode, loc);
+
+		    nodes.put(node.id, newNode);
+		    if (node.id != myNid)
+			resetTimeoutAtNode(node.id);
+		}
+
+
+	    // remove nodes
+
+	    for (Map.Entry<Short,NodeState> entry : nodes.entrySet()) {
+		short nid = entry.getKey();
+		NodeState node = entry.getValue();
+
+		// Remove the node from the subinterval during which it
+		// was pinged.
+		int index = pingId.get(node);
+		pingId.remove(node);
+		pingTable[index].remove(node);
+
+		if (!newNids.contains(nid)) {
+		    nodes.remove(nid);
+		}
+	    }
+	} // end synchronized
+
 
         // consistency cleanups: check that all nid references are still valid nid's
 
