@@ -99,9 +99,9 @@ public class NeuRonNode extends Thread {
      */
     private final SortedSet<NodeState> rendezvousClients = new TreeSet<NodeState>();
 
+    // These variables used internally to updateMembers (keep this way, for
+    // abstraction purposes), and are only exposed for printGrid().
     private NodeState[][] grid;
-    private Hashtable<NodeState, Short> gridRow = new Hashtable<NodeState, Short>();
-    private Hashtable<NodeState, Short> gridColumn = new Hashtable<NodeState, Short>();
     private short numCols, numRows;
 
     private final Hashtable<InetAddress, Short> addr2id = new Hashtable<InetAddress, Short>();
@@ -1161,18 +1161,106 @@ public class NeuRonNode extends Thread {
         otherNodes.addAll(nodes.values());
         otherNodes.remove(self);
 
+	// ABOVE IS INDEPENDENT OF GRID
+
         numCols = (short) Math.ceil(Math.sqrt(nodes.size()));
         numRows = (short) Math.ceil((double) nodes.size() / (double) numCols);
         grid = new NodeState[numRows][numCols];
-        gridRow.clear();
-        gridColumn.clear();
+
+	// These are used temporarily for setting up the defaults
+	Hashtable<NodeState, Short> gridRow = new Hashtable<NodeState, Short>();
+	Hashtable<NodeState, Short> gridColumn = new Hashtable<NodeState, Short>();
+
         List<Short> nids = memberNids;
-        for (short i = 0, r = 0; r < numRows; r++)
+	short i = 0;  // node counter
+	short numberOfNodes = (short) memberNids.size();
+	short lastColUsed = (short) (numCols - 1);  // default is for the full grid
+
+	gridLoop:
+	for (short r = 0; r < numRows; r++) {
             for (short c = 0; c < numCols; c++) {
-                grid[r][c] = nodes.get(nids.get(i++ % nids.size()));
+
+		// Are there any more nodes to put into the grid?
+		if(i > numberOfNodes - 1) {
+		    // Assert: We shouldn't create a grid with an empty last row.
+		    assert (r == numRows - 1) && (c > 0);
+		    lastColUsed = (short) (c - 1);
+		    break gridLoop;
+		}
+
+                grid[r][c] = nodes.get(nids.get(i++));
                 gridRow.put(grid[r][c], r);
                 gridColumn.put(grid[r][c], c);
             }
+	}
+
+	// Keep track of this node's grid position
+        int rz = gridRow.get(self);
+        int cz = gridColumn.get(self);
+
+
+	// Algorithm described in model_choices.tex
+
+	// Set up hash of each node's default rendezvous servers
+	// Note: a node's default rendezvous servers will include itself.
+	nodeDefaultRSs.clear();
+	for(NodeState node : nodes.values()) {
+
+	    int rn = gridRow.get(node);
+	    int cn = gridColumn.get(node);
+
+	    // We know the number of elements. Should be [1/(default load factor)]*size
+	    HashSet<NodeState> nodeDefaults = new HashSet<NodeState>((int) 1.4*(numRows + numCols - 1));
+
+	    // If this is not the last row
+	    if(rn < numRows - 1) {
+
+		// Add the whole row
+		for (int c1 = 0; c1 < numCols; c1++)
+		    nodeDefaults.add(grid[rn][c1]);
+
+		// If this is before the last col used (on last row)
+		if(cn <= lastColUsed) {
+
+		    // Add whole column
+		    for (int r1 = 0; r1 < numRows; r1++)
+			nodeDefaults.add(grid[r1][cn]);
+		}
+		else {
+
+		    // Add column up until last row
+		    for (int r1 = 0; r1 < numRows-1; r1++)
+			nodeDefaults.add(grid[r1][cn]);
+
+		    // Add corresponding node from the last row (column rn);
+		    //    only for the first lastColUsed rows.
+		    if(rn <= lastColUsed) {
+			nodeDefaults.add(grid[numRows-1][rn]);
+		    }
+		}
+	    }
+	    else {
+
+		// This is the last row
+
+		// Add whole column
+		for (int r1 = 0; r1 < numRows; r1++)
+		    nodeDefaults.add(grid[r1][cn]);
+
+		// Add whole last row up till lastColUsed
+		for (int c1 = 0; c1 <= lastColUsed; c1++)
+		    nodeDefaults.add(grid[rn][c1]);
+		
+		// Add row cn for columns > lastColUsed
+		for (int c1 = lastColUsed+1; c1 < numCols; c1++)
+		    nodeDefaults.add(grid[cn][c1]);
+	    }
+
+	    // Could also make an array of nodeDefaults, for less memory usage/faster
+	    nodeDefaultRSs.put(node, nodeDefaults);
+	}
+
+	// BELOW IS INDEPENDENT OF GRID
 
         /*
          * simply forget about all our neighbors. thus, this forgets all our
@@ -1184,33 +1272,15 @@ public class NeuRonNode extends Thread {
          * broadcast to us. this is a non-issue because we ignore stale
          * messages, and when they do become updated, they'll forget about us
          * too.
-         *
-         * this should correctly handle nodes that reappear in the grid.
          */
 
-	// TODO: does not correctly handle nodes that reappear in grid.
-
+	// Set up rendezvous clients
         rendezvousClients.clear();
-        defaultRendezvousServers.clear();
-	nodeDefaultRSs.clear();
-        int rz = gridRow.get(self);
-        int cz = gridColumn.get(self);
-        HashSet<NodeState> rendezvousClientRow = new HashSet<NodeState>();
-        HashSet<NodeState> rendezvousClientCol = new HashSet<NodeState>();
-        // add this column and row as clients
-        for (int r1 = 0; r1 < numRows; r1++) {
-            NodeState cli = grid[r1][cz];
-            if (cli.isReachable && cli != self)
-                rendezvousClientCol.add(cli);
-        }
-        for (int c1 = 0; c1 < numCols; c1++) {
-            NodeState cli = grid[rz][c1];
-            if (cli.isReachable && cli != self)
-                rendezvousClientRow.add(cli);
-        }
+        for (NodeState cli : nodeDefaultRSs.get(self)) {
 
-        rendezvousClients.addAll(rendezvousClientRow);
-        rendezvousClients.addAll(rendezvousClientCol);
+            if (cli.isReachable && cli != self)
+		rendezvousClients.add(cli);
+	}
 
         // Put timeouts for all new rendezvous clients. If they can never
         // reach us, we should stop sending them recommendations.
@@ -1229,57 +1299,35 @@ public class NeuRonNode extends Thread {
             rendezvousClientTimeouts.put(clientNode.info.id, future);
         }
 
-        // add the default rendezvous servers to all destinations
-        for (int r0 = 0; r0 < numRows; r0++) {
-            for (int c0 = 0; c0 < numCols; c0++) {
-                NodeState dst = grid[r0][c0];
-                HashSet<NodeState> rs = defaultRendezvousServers.get(dst.info.id);
-                if (rs == null) {
-                    rs = new HashSet<NodeState>();
-                    defaultRendezvousServers.put(dst.info.id, rs);
-                }
-                if (r0 != rz && c0 != cz) {
-                    // normally, add the pairs
-                    if (self != grid[rz][c0])
-                        rs.add(grid[rz][c0]);
-                    if (self != grid[r0][cz])
-                        rs.add(grid[r0][cz]);
-                } else if (c0 == cz) {
-                    /*
-                     * if this is in our col (a neighbor), everyone
-                     * else in that col is in essence a rendezvous
-                     * server between us two
-                     */
-                    rs.addAll(rendezvousClientCol);
-                } else if (r0 == rz) {
-                    /*
-                     * ditto for rows
-                     */
-                    rs.addAll(rendezvousClientRow);
-                }
-            }
-        }
+        // Set up default rendezvous servers to all destinations
 
-	// update nodeDefaultRSs so that each node has its default rendezvous servers
-	for(NodeState node : nodes.values()) {
+	// Note: In an earlier version of the code, for a destination in
+	//       our row/col, we did not add rendezvous nodes which are not
+	//       reachable. We no longer do this (but it shouldn't matter).
 
-	    int rn = gridRow.get(node);
-	    int cn = gridColumn.get(node);
+        defaultRendezvousServers.clear();
+        for (NodeState dst : nodes.values()) {   // note: including self
 
-	    // We know upper bound on number of elements. should be 1/(default load factor)*
-	    HashSet<NodeState> nodeDefaults = new HashSet<NodeState>((int) 1.4*(numRows + numCols - 1));
+	    HashSet<NodeState> rs = new HashSet<NodeState>();
+	    defaultRendezvousServers.put(dst.info.id, rs);
 
-	    // Put in node's row and column. Node that there could be repeats.
-	    // NOTE: for duplicated nodes, gridRow and gridColumn refer to last instance.
-	    for (int r1 = 0; r1 < numRows; r1++)
-		nodeDefaults.add(grid[r1][cn]);
-	    for (int c1 = 0; c1 < numCols; c1++)
-		nodeDefaults.add(grid[rn][c1]);
+	    // Take intersection of this node's default rendezvous and
+	    // the dst's default rendezvous servers, excluding self.
+	    // Running time for outer loop is 2n^{1.5} since we are using
+	    // a HashSet for quick lookups. Could be optimized further,
+	    // but code simplicity is preferred.
 
-	    // Could also make an array of nodeDefaults, for less memory usage/faster
-	    nodeDefaultRSs.put(node, nodeDefaults);
+	    HashSet<NodeState> dstDefaults = nodeDefaultRSs.get(dst);
+	    for (NodeState selfRS : nodeDefaultRSs.get(self)) {
+
+		// Don't add self because we will never receive routing
+		// recommendation messages from ourselves.
+		if (selfRS != self && dstDefaults.contains(selfRS))
+		    rs.add(selfRS);
+	    }
 	}
 
+	// Initialize the per-destination rendezvous servers with the defaults
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
