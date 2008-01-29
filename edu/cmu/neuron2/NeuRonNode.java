@@ -1192,14 +1192,12 @@ public class NeuRonNode extends Thread {
 	    for (Map.Entry<Short,NodeState> entry : nodes.entrySet()) {
 		short nid = entry.getKey();
 		NodeState node = entry.getValue();
-
-		// Remove the node from the subinterval during which it
-		// was pinged.
-		int index = pingId.get(node);
-		pingId.remove(node);
-		pingTable[index].remove(node);
-
 		if (!newNids.contains(nid)) {
+                    // Remove the node from the subinterval during which it
+                    // was pinged.
+                    int index = pingId.get(node);
+                    pingId.remove(node);
+                    pingTable[index].remove(node);
 		    nodes.remove(nid);
 		}
 	    }
