@@ -627,7 +627,8 @@ public class NeuRonNode extends Thread {
 		}
 	    }
 
-	    log("sent subpings " + bytes + " bytes, to " + nids);
+	    if(bytes > 0)
+		log("sent subpings " + bytes + " bytes, to " + nids);
 	}
     }
 
