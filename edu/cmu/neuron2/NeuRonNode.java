@@ -1596,7 +1596,6 @@ public class NeuRonNode extends Thread {
 		    // that we can share when possible. that is, if we know that a
 		    // failover works for a destination, keep using it.
 
-		    HashSet<NodeState> colrowFailovers = new HashSet<NodeState>();
 		    HashSet<NodeState> dstDefault = nodeDefaultRSs.get(dst);
 
 		    for(NodeState f : currentRSs) {
