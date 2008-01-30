@@ -193,13 +193,13 @@ public class NeuRonNode extends Thread {
         final HashSet<String> suppressedLabels = new HashSet<String>(Arrays.asList(labels));
         handler.setFilter(new LabelFilter(suppressedLabels));
     }
-    
+
     private final int joinDelay;
 
     public NeuRonNode(short id, ExecutorService executor, ScheduledExecutorService scheduler,
                         Properties props, short numNodes, Semaphore semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode) {
-        
+
         joinDelay = rand.nextInt(Integer.parseInt(props.getProperty("joinDelayRange", "1")));
 
         if ((coordNode == null) || (coordNode.addr == null)){
@@ -225,7 +225,12 @@ public class NeuRonNode extends Thread {
 
         mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
         basePort = coordNode.port;
-        neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "30"));
+        scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SQRT").toUpperCase());
+        if (scheme == RoutingScheme.SQRT) {
+        	neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "15"));
+        } else {
+        	neighborBroadcastPeriod = Integer.parseInt(props.getProperty("neighborBroadcastPeriod", "30"));
+        }
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
         enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
 
@@ -233,12 +238,11 @@ public class NeuRonNode extends Thread {
         //if (mode == RunMode.SIM) {
             //probePeriod = Integer.parseInt(props.getProperty("probePeriod", "60"));
         //} else {
-            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "10"));
+            probePeriod = Integer.parseInt(props.getProperty("probePeriod", "30"));
         //}
         subpingPeriod = Integer.parseInt(props.getProperty("subpingPeriod", "" + probePeriod));
-        membershipTimeout = Integer.parseInt(props.getProperty("timeout", "" + probePeriod * 3));
+        membershipTimeout = Integer.parseInt(props.getProperty("timeout", "" + 30*60));
         linkTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + membershipTimeout));
-        scheme = RoutingScheme.valueOf(props.getProperty("scheme", "SQRT").toUpperCase());
 
         // Events are when simulated latencies change; these are substituted in
         // for real measured latencies, and can be useful in simulation. These
@@ -453,7 +457,7 @@ public class NeuRonNode extends Thread {
     }
 
     private boolean hasJoined = false;
-    
+
     public void run3() {
         if (isCoordinator) {
             try {
@@ -486,7 +490,7 @@ public class NeuRonNode extends Thread {
 		    pingTable[i] = new HashSet();
 
 		int probeSubPeriod = (1000 * probePeriod) / numProbeIntervals;
-		
+
                 safeScheduleMs(safeRun(new Runnable() {
 			int pingIter = 0;
 
@@ -599,7 +603,7 @@ public class NeuRonNode extends Thread {
             ignored.remove(nid);
         }
     }
-    
+
     private ArrayList<NodeState> getAllReachableNodes() {
         ArrayList<NodeState> nbrs = new ArrayList<NodeState>();
         for (NodeState n : otherNodes)
@@ -1184,7 +1188,7 @@ public class NeuRonNode extends Thread {
 
 	    for (NodeInfo node : newNodes)
 		if (!nodes.containsKey(node.id)) {
-		
+
 		    NodeState newNode = new NodeState(node);
 
 		    // Choose a subinterval for this node during which we will ping it
@@ -1339,7 +1343,7 @@ public class NeuRonNode extends Thread {
 		// Add whole last row up till lastColUsed
 		for (int c1 = 0; c1 <= lastColUsed; c1++)
 		    nodeDefaults.add(grid[rn][c1]);
-		
+
 		// Add row cn for columns > lastColUsed
 		for (int c1 = lastColUsed+1; c1 < numCols; c1++)
 		    nodeDefaults.add(grid[cn][c1]);
@@ -1544,7 +1548,7 @@ public class NeuRonNode extends Thread {
 		// check if any of our default rendezvous servers are once
 		// more available; if so, add them back
 		HashSet<NodeState> defaults = defaultRendezvousServers.get(dst.info.id);
-		
+
 		// we always want to try talking to our default rendezvous
 		// servers if we think they're reachable
 		for (NodeState r : defaults)
@@ -2340,11 +2344,11 @@ class PeeringRequest extends Msg {
 }
 
       class Serialization {
-    
+
 
       public void serialize(Object obj, DataOutputStream out) throws IOException {
       if (false) {}
-      
+
 else if (obj.getClass() == NodeInfo.class) {
 NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
 out.writeShort(casted.id);
@@ -2373,7 +2377,7 @@ out.writeShort(casted.session);
 else if (obj.getClass() == Init.class) {
 Init casted = (Init) obj; out.writeInt(4);
 out.writeShort(casted.id);
- out.writeInt(casted.members.size()); 
+ out.writeInt(casted.members.size());
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeShort(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -2385,7 +2389,7 @@ out.writeShort(casted.session);
 }
 else if (obj.getClass() == Membership.class) {
 Membership casted = (Membership) obj; out.writeInt(5);
- out.writeInt(casted.members.size()); 
+ out.writeInt(casted.members.size());
 for (int i = 0; i < casted.members.size(); i++) {
 out.writeShort(casted.members.get(i).id);
 out.writeInt(casted.members.get(i).port);
@@ -2399,7 +2403,7 @@ out.writeShort(casted.session);
 }
 else if (obj.getClass() == RoutingRecs.class) {
 RoutingRecs casted = (RoutingRecs) obj; out.writeInt(6);
- out.writeInt(casted.recs.size()); 
+ out.writeInt(casted.recs.size());
 for (int i = 0; i < casted.recs.size(); i++) {
 out.writeShort(casted.recs.get(i).dst);
 out.writeShort(casted.recs.get(i).via);
@@ -2461,7 +2465,7 @@ out.writeShort(casted.session);
 
       public Object deserialize(DataInputStream in) throws IOException {
       switch (readInt(in)) {
-    
+
 case 0: { // NodeInfo
 NodeInfo obj;
 {
@@ -2478,11 +2482,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         obj.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 return obj;}
@@ -2523,11 +2527,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         obj.addr = InetAddress.getByAddress(buf);
-        
+
 }
 {
 obj.port = readInt(in);
@@ -2570,11 +2574,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         x.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 obj.members.add(x);
@@ -2615,11 +2619,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         x.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 obj.members.add(x);
@@ -2698,11 +2702,11 @@ byte[] buf;
 
           buf = new byte[readInt(in)];
           in.read(buf);
-        
+
 }
 
         obj.info.addr = InetAddress.getByAddress(buf);
-        
+
 }
 }
 {
@@ -2780,7 +2784,7 @@ obj.probeTable[i] = in.readShort();
 
           obj.inflation = new byte[readInt(in)];
           in.read(obj.inflation);
-        
+
 }
 {
 {
