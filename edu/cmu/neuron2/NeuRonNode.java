@@ -155,7 +155,8 @@ public class NeuRonNode extends Thread {
 
     private final int membershipBroadcastPeriod;
 
-    private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping send.Pong recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
+    //private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping send.Pong recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
+    private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
 
     private final Hashtable<Short,Long> lastSentMbr = new Hashtable<Short,Long>();
 
@@ -680,6 +681,7 @@ public class NeuRonNode extends Thread {
 
     private void pingAll(int pingIter) {
         log("pinging");
+        int totalSize = 0;
 
 	// We will only ping a fraction of the nodes at this iteration
 	// Note: this synch. statement is redundant until we remove global lock
@@ -695,7 +697,7 @@ public class NeuRonNode extends Thread {
 	    for (Object node : pingTable[pingIter]) {
 		short nid = ((NodeState)node).info.id;
 		if (nid != myNid)
-		    sendObject(ping, nid);
+		    totalSize += sendObject(ping, nid);
 	    }
 
 	    /* send ping to the membership server (co-ord) -
@@ -710,8 +712,9 @@ public class NeuRonNode extends Thread {
 
 	    // Only ping the coordinator once per ping interval (not per subinterval)
 	    if(pingIter == 0)
-		sendObject(ping, (short)0);
+		totalSize += sendObject(ping, (short)0);
 	}
+        log("sent pings, " + totalSize + " bytes");
     }
 
     private Msg deserialize(Object o) {

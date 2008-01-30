@@ -115,6 +115,13 @@ public class RonTest {
             }
             semAllJoined.acquire();
             if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
+
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException ex) {
+                throw new RuntimeException(ex);
+            }
+
             sim(simData, nodes, scheduler);
             break;
         case DIST:
@@ -159,8 +166,10 @@ public class RonTest {
                         //nodes.get(dst).ignore(src);
                         for (NeuRonNode node : nodes) {
                             if (node.myNid == src) {
+                                System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
                                 node.ignore(dst);
                             } else if (node.myNid == dst) {
+                                System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
                                 node.ignore(src);
                             }
                         }
