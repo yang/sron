@@ -161,7 +161,7 @@ public class NeuRonNode extends Thread {
 
     private final double smoothingFactor;
     private final short resetLatency = Short.MAX_VALUE;
-    
+
     private final DatagramAcceptor acceptor;
 
     private final Hashtable<Short, NodeInfo> coordNodes = new Hashtable<Short, NodeInfo>();
@@ -175,6 +175,8 @@ public class NeuRonNode extends Thread {
     private final double directBonus, hysteresisBonus;
 
     private final long startTime = System.currentTimeMillis();
+
+    private final int pingDumpPeriod, pingDumpInitialDelay;
 
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
@@ -236,7 +238,7 @@ public class NeuRonNode extends Thread {
         }
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
         enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
-        
+
         this.acceptor = acceptor;
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
@@ -248,6 +250,9 @@ public class NeuRonNode extends Thread {
         subpingPeriod = Integer.parseInt(props.getProperty("subpingPeriod", "" + probePeriod));
         membershipTimeout = Integer.parseInt(props.getProperty("timeout", "" + 30*60));
         linkTimeout = Integer.parseInt(props.getProperty("failoverTimeout", "" + membershipTimeout));
+
+        pingDumpInitialDelay = Integer.parseInt(props.getProperty("pingDumpInitialDelay", "60"));
+        pingDumpPeriod = Integer.parseInt(props.getProperty("pingDumpPeriod", "60"));
 
         // Events are when simulated latencies change; these are substituted in
         // for real measured latencies, and can be useful in simulation. These
@@ -559,6 +564,12 @@ public class NeuRonNode extends Thread {
                     // TODO should these initial offsets be constants?
                 }
 
+                scheduler.scheduleWithFixedDelay(safeRun(new Runnable() {
+                    public void run() {
+                        log("received/sent " + pings + " pings/pongs");
+                    }
+                }), pingDumpInitialDelay, pingDumpPeriod, TimeUnit.SECONDS);
+
                 final InetAddress coordAddr = InetAddress.getByName(coordinatorHost);
                 scheduler.schedule(safeRun(new Runnable() {
                     private int count = 0;
@@ -861,6 +872,8 @@ public class NeuRonNode extends Thread {
         }
     }
 
+    int pings = 0;
+
     /**
      * receiver's msg handling loop
      */
@@ -905,6 +918,7 @@ public class NeuRonNode extends Thread {
                         // always reply to pings and log pongs
 
                         if (msg instanceof Ping) {
+                            pings++;
                             Ping ping = ((Ping) msg);
                             Pong pong = new Pong();
                             pong.time = ping.time;
