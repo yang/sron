@@ -177,6 +177,7 @@ public class NeuRonNode extends Thread {
     private final long startTime = System.currentTimeMillis();
 
     private final int pingDumpPeriod, pingDumpInitialDelay;
+    private final long pingpongTotalSize = 0;
 
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
@@ -567,6 +568,9 @@ public class NeuRonNode extends Thread {
                 scheduler.scheduleWithFixedDelay(safeRun(new Runnable() {
                     public void run() {
                         log("received/sent " + pings + " pings/pongs");
+                        log("sent ping_pongs, " + pingpongTotalSize + " bytes, since last log");
+                        // benign race: no lock required as this is just a stat and we can be off by a little
+                        pingpongTotalSize = 0; 
                     }
                 }), pingDumpInitialDelay, pingDumpPeriod, TimeUnit.SECONDS);
 
@@ -690,7 +694,6 @@ public class NeuRonNode extends Thread {
 
     private void pingAll(int pingIter) {
         log("pinging");
-        int totalSize = 0;
 
 	// We will only ping a fraction of the nodes at this iteration
 	// Note: this synch. statement is redundant until we remove global lock
@@ -705,8 +708,9 @@ public class NeuRonNode extends Thread {
 	    ping.info.port = tmp.port;
 	    for (Object node : pingTable[pingIter]) {
 		short nid = ((NodeState)node).info.id;
-		if (nid != myNid)
-		    totalSize += sendObject(ping, nid);
+		if (nid != myNid) {
+		    pingpongTotalSize += sendObject(ping, nid);
+                }
 	    }
 
 	    /* send ping to the membership server (co-ord) -
@@ -720,10 +724,11 @@ public class NeuRonNode extends Thread {
 	    */
 
 	    // Only ping the coordinator once per ping interval (not per subinterval)
-	    if(pingIter == 0)
-		totalSize += sendObject(ping, (short)0);
+	    if(pingIter == 0) {
+		pingpongTotalSize += sendObject(ping, (short)0);
+            }
 	}
-        log("sent pings, " + totalSize + " bytes");
+        //log("sent pings, " + totalSize + " bytes");
     }
 
     private Msg deserialize(Object o) {
@@ -922,7 +927,7 @@ public class NeuRonNode extends Thread {
                             Ping ping = ((Ping) msg);
                             Pong pong = new Pong();
                             pong.time = ping.time;
-                            sendObject(pong, ping.info);
+                            pingpongTotalSize += sendObject(pong, ping.info);
                         } else if (msg instanceof Pong) {
                             Pong pong = (Pong) msg;
                             long rawRtt = System.currentTimeMillis() - pong.time;
