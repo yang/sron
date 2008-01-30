@@ -177,7 +177,6 @@ public class NeuRonNode extends Thread {
     private final long startTime = System.currentTimeMillis();
 
     private final int pingDumpPeriod, pingDumpInitialDelay;
-    private final long pingpongTotalSize = 0;
 
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
@@ -878,6 +877,7 @@ public class NeuRonNode extends Thread {
     }
 
     int pings = 0;
+    long pingpongTotalSize = 0;
 
     /**
      * receiver's msg handling loop
