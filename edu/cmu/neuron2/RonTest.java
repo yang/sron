@@ -18,6 +18,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 import edu.cmu.neuron2.NeuRonNode.PlannedException;
+import org.apache.mina.common.ThreadModel;
+import org.apache.mina.transport.socket.nio.DatagramAcceptor;
 
 public class RonTest {
 
@@ -64,6 +66,12 @@ public class RonTest {
 
         final ExecutorService executor = Executors.newSingleThreadExecutor();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        // periodically GC
+        scheduler.scheduleWithFixedDelay(new Runnable() {
+            public void run() {
+                System.gc();
+            }
+        }, 1, 1, TimeUnit.MINUTES);
 
         final List<NeuRonNode> nodes = new ArrayList<NeuRonNode>();
         Runtime.getRuntime().addShutdownHook(new Thread() {
@@ -92,7 +100,8 @@ public class RonTest {
         }
         coordNode.port = basePort;
 
-        ExecutorService launcher = Executors.newFixedThreadPool(2);
+        DatagramAcceptor acceptor = new DatagramAcceptor();
+        acceptor.getDefaultConfig().setThreadModel(ThreadModel.MANUAL);
 
         switch (mode) {
         case SIM:
@@ -106,11 +115,8 @@ public class RonTest {
             for (short i = 0; i <= numNodes; i++) {
                 NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
                                                 numNodes, i == 0 ? semAllJoined : null, myCachedAddr,
-                                                coordinatorHost, coordNode);
-                node.start();
-                //launcher.submit(node);
-                //if (i == 0) node.start();
-                //else node.run();
+                                                coordinatorHost, coordNode, acceptor);
+                node.run();
                 nodes.add(node);
             }
             semAllJoined.acquire();
@@ -127,8 +133,8 @@ public class RonTest {
         case DIST:
             NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
                                             props, numNodes, semAllJoined, null,
-                                            coordinatorHost, coordNode);
-            node.start();
+                                            coordinatorHost, coordNode, acceptor);
+            node.run();
             nodes.add(node);
             semAllJoined.acquire();
             if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();

@@ -155,13 +155,14 @@ public class NeuRonNode extends Thread {
 
     private final int membershipBroadcastPeriod;
 
-    //private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping send.Pong recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
-    private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
+    private static final String defaultLabelSet = "subprobe send.Ping recv.Ping stale.Ping send.Pong recv.Pong send.Subprobe recv.Subprobe stale.Pong send.Measurements send.RoutingRecs subprobe";
 
     private final Hashtable<Short,Long> lastSentMbr = new Hashtable<Short,Long>();
 
     private final double smoothingFactor;
     private final short resetLatency = Short.MAX_VALUE;
+    
+    private final DatagramAcceptor acceptor;
 
     private final Hashtable<Short, NodeInfo> coordNodes = new Hashtable<Short, NodeInfo>();
 
@@ -199,7 +200,8 @@ public class NeuRonNode extends Thread {
 
     public NeuRonNode(short id, ExecutorService executor, ScheduledExecutorService scheduler,
                         Properties props, short numNodes, Semaphore semJoined,
-                        InetAddress myAddr, String coordinatorHost, NodeInfo coordNode) {
+                        InetAddress myAddr, String coordinatorHost, NodeInfo coordNode,
+                        DatagramAcceptor acceptor) {
 
         joinDelay = rand.nextInt(Integer.parseInt(props.getProperty("joinDelayRange", "1")));
 
@@ -234,6 +236,8 @@ public class NeuRonNode extends Thread {
         }
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
         enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
+        
+        this.acceptor = acceptor;
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
         //if (mode == RunMode.SIM) {
@@ -469,7 +473,7 @@ public class NeuRonNode extends Thread {
                         //printGrid();
                     }
                 }), dumpPeriod, dumpPeriod);
-                new DatagramAcceptor().bind(new InetSocketAddress(InetAddress
+                acceptor.bind(new InetSocketAddress(InetAddress
                         .getLocalHost(), basePort), new CoordReceiver());
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
@@ -477,7 +481,7 @@ public class NeuRonNode extends Thread {
         } else {
             try {
                 final Receiver receiver = new Receiver();
-                new DatagramAcceptor().bind(new InetSocketAddress(myCachedAddr, myPort),
+                acceptor.bind(new InetSocketAddress(myCachedAddr, myPort),
                                             receiver);
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
@@ -554,12 +558,6 @@ public class NeuRonNode extends Thread {
 			}), 5521, subpingSubPeriod);
                     // TODO should these initial offsets be constants?
                 }
-
-                safeSchedule(new Runnable() {
-                    public void run() {
-                        System.gc();
-                    }
-                }, 3, gcPeriod);
 
                 final InetAddress coordAddr = InetAddress.getByName(coordinatorHost);
                 scheduler.schedule(safeRun(new Runnable() {
