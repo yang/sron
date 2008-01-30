@@ -506,6 +506,7 @@ public class NeuRonNode extends Thread {
                              * interdependent. the fact that we do the path-finding
                              * first before the rendezvous servers is arbitrary.
                              */
+			    // TODO the below can be decoupled
                             Pair<Integer, Integer> p = findPathsForAllNodes();
                             log(p.first
                                     + " live nodes, "
@@ -513,9 +514,18 @@ public class NeuRonNode extends Thread {
                                     + " avg paths, "
                                     + nodes.get(myNid).latencies.keySet()
                                             .size() + " direct paths");
+			    // TODO this can also be decoupled
                             ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ? getAllReachableNodes()
                                     : getAllRendezvousServers();
+			    // TODO this can also be decoupled, and also split up
+			    //   into intervals. We should keep the probeTable[]
+			    //   in memory and always up to date. Further optimization
+			    //   is to keep array of bytes, so no serialization.
                             broadcastMeasurements(measRecips);
+			    // TODO this can also be decoupled. Don't use
+			    //   getAllRendezvousClients(), just work directly with
+			    //   the list. Order doesn't matter (confirm).
+			    //   Also split calls to findHops into intervals.
                             if (scheme != RoutingScheme.SIMPLE) {
                                 broadcastRecommendations();
                             }
@@ -2079,7 +2089,10 @@ public class NeuRonNode extends Thread {
     }
 
     /**
-     * counts the avg number of one-hop or direct paths available to nodes
+     * Counts the avg number of one-hop or direct paths available to nodes
+     * Calls findPaths(node) for all other nodes. This code is supposed to
+     * a) find out a node is alive, and b) find the optimal one-hop route to
+     * this destination.
      * @return
      */
     private Pair<Integer, Integer> findPathsForAllNodes() {
