@@ -76,7 +76,7 @@ $num_runs = num_runs
 $get_subdir = get_subdir
 $datadir = datadir
 def agg_runs(scheme, num_nodes, failure_rate, xs)
-  neighborBroadcastPeriod = 30
+  neighborBroadcastPeriod = 15
   datadir = $datadir
   for run in 1..$num_runs
     subdir = eval $get_subdir
@@ -142,7 +142,7 @@ when 'run'
           # run for all configs with the same failure data set.
           sys("./run.bash -DenableSubpings=false -DtotalTime=#{total_time} -DconsoleLogFilter=all" +
               " -DnumNodes=#{num_nodes} -Dscheme=#{scheme}" +
-              " -DprobePeriod=10 -DneighborBroadcastPeriod=30" +
+              " -DprobePeriod=30 -DneighborBroadcastPeriod=15" +
               " #{extra_args}" +
               " -DlogFileBase=#{subdir}/ > /dev/null")
         end
