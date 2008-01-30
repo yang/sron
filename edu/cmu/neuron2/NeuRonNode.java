@@ -439,7 +439,7 @@ public class NeuRonNode extends Thread {
         }, initialDelay, TimeUnit.SECONDS);
     }
     private ScheduledFuture<?> safeScheduleMs(final Runnable r, long initialDelay, final long period) {
-        final long bufferTime = 1000; // TODO parameterize
+        final long bufferTime = 0; // TODO parameterize?
         return scheduler.schedule(new Runnable() {
             private long scheduledTime = -1;
             public void run() {
