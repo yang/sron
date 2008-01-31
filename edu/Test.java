@@ -7,6 +7,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.mina.common.IoHandlerAdapter;
 import org.apache.mina.common.IoSession;
 import org.apache.mina.common.ThreadModel;
@@ -17,15 +20,23 @@ public class Test {
 
     public static void main(String[] args) throws Exception {
         InetAddress addr = InetAddress.getLocalHost();
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ScheduledExecutorService executor = Executors
+                .newSingleThreadScheduledExecutor();
+        executor.schedule(new Runnable() {
+            public void run() {
+                System.out.println("hello world");
+            }
+        }, 10, TimeUnit.MILLISECONDS);
         DatagramAcceptor a = new DatagramAcceptor(executor);
         a.getDefaultConfig().setThreadModel(ThreadModel.MANUAL);
         for (int i = 0; i < 2; i++) {
             a.bind(new InetSocketAddress(addr, 10000 + i),
                     new IoHandlerAdapter() {
-                        public void messageReceived(IoSession session, Object obj)
-                                throws Exception {
-                            System.out.println("received " + obj + " on " + session.getLocalAddress() + " in thread " + Thread.currentThread().getName());
+                        public void messageReceived(IoSession session,
+                                Object obj) throws Exception {
+                            System.out.println("received " + obj + " on "
+                                    + session.getLocalAddress() + " in thread "
+                                    + Thread.currentThread().getName());
                         }
                     });
         }
