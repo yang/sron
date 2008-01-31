@@ -1268,16 +1268,17 @@ public class NeuRonNode extends Thread {
             for (Map.Entry<Short, NodeState> entry : nodes.entrySet())
                 if (!newNids.contains(entry.getKey()))
                     toRemove.add(Pair.of(entry.getKey(), entry.getValue()));
+            System.out.println(myNid + " removing nodes " + toRemove  + " from " + nodes + " newNids " + newNids);
             for (Pair<Short, NodeState> pair : toRemove) {
-                int nid = pair.first;
-                NodeState node = pair.second();
+                short nid = pair.first;
+                NodeState node = pair.second;
                 // Remove the node from the subinterval during which it
                 // was pinged.
-                int index = pingId.get(node);
-                pingId.remove(node);
+                int index = pingId.remove(node);
                 pingTable[index].remove(node);
                 addr2node.remove(new InetSocketAddress(node.info.addr, node.info.port));
-                nodes.remove(nid);
+                NodeState n = nodes.remove(nid);
+                assert n != null;
             }
 	} // end synchronized
 
@@ -1349,11 +1350,6 @@ public class NeuRonNode extends Thread {
                 gridColumn.put(grid[r][c], c);
             }
 	}
-
-	// Keep track of this node's grid position
-        int rz = gridRow.get(self);
-        int cz = gridColumn.get(self);
-
 
 	// Algorithm described in model_choices.tex
 

@@ -29,7 +29,7 @@ public class Pair<A,B>
 	}
 	public int hashCode()
 	{
-		return first.hashCode()+second.hashCode();
+		return first.hashCode()^second.hashCode();
 	}
 
 	public static <A,B> Pair<A,B> of(A a, B b)
