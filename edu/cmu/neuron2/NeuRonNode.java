@@ -1489,17 +1489,6 @@ public class NeuRonNode extends Thread {
         }
         lastRendezvousServers.clear();
 
-	// This code is no longer operational. Not yet deleted in case we need similar soon.
-	//        for (int r0 = 0; r0 < numRows; r0++) {
-	//            for (int c0 = 0; c0 < numCols; c0++) {
-	//                NodeState n = grid[r0][c0];
-	//                for (int r1 = 0; r1 < numRows; r1++)
-	//                    n.defaultClients.add(grid[r1][c0]);
-	//                for (int c1 = 0; c1 < numCols; c1++)
-	//                    n.defaultClients.add(grid[r0][c1]);
-	//                n.defaultClients.remove(self);
-	//            }
-	//        }
 
         log("state " + currentStateVersion + ", mbrs " + nids);
     }
@@ -2023,24 +2012,24 @@ public class NeuRonNode extends Thread {
             }
         }
 
-	//	if (scheme != RoutingScheme.SQRT_SPECIAL) {
+	if (scheme != RoutingScheme.SQRT_SPECIAL) {
 	    /*
 	     * get the full set of dsts that we depend on this node for. note
 	     * that the set of nodes it's actually serving may be different.
 	     */
-	    
-	//	    for (NodeState dst : r.defaultClients) {
-	//		if (!r.dstsPresent.contains(dst.info.id)) {
+	    // TODO (low priority): change logic to keep track of who you hear from
+	    for (NodeState dst : nodeDefaultRSs.get(r)) {
+		if (!r.dstsPresent.contains(dst.info.id)) {
 		    /*
 		     * there was a comm failure between this rendezvous and the
 		     * dst for which this rendezvous did not provide a
-		     * recommendation. consider this a rendezvous failure, so that if
+		     * recommendation. this a proximal rendezvous failure, so that if
 		     * necessary during the next phase, we will find failovers.
 		     */
-	//		    r.remoteFailures.add(dst);
-	//		}
-	//	    }
-	//	}
+		    r.remoteFailures.add(dst);
+		}
+	    }
+	}
     }
 
     /**
@@ -2264,11 +2253,6 @@ public class NeuRonNode extends Thread {
          */
         public final HashSet<Short> dstsPresent = new HashSet<Short>();
 
-	// This code is no longer operational. Not yet deleted in case we need similar soon.
-	//        /**
-	//         * basically, his row/col. (all the nodes that he's responsible for).
-	//         */
-	//        public final HashSet<NodeState> defaultClients = new HashSet<NodeState>();
 
         /**
          * this is unused at the moment. still need to re-design.
