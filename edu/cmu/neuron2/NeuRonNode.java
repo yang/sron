@@ -762,7 +762,7 @@ public class NeuRonNode extends Thread {
             return new Serialization().deserialize(new DataInputStream(new
                         ByteArrayInputStream(bytes)));
         } catch (Exception ex) {
-            err("deserialization exception: " + ex.getMessage());
+            err(ex);
             return null;
         }
     }
