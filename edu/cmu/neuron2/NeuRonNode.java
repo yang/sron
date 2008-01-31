@@ -1500,6 +1500,13 @@ public class NeuRonNode extends Thread {
      */
     private boolean isFailedRendezvous(NodeState n, NodeState remote) {
 	// TODO: isReachable semantics should be fixed (but how?)
+	// NOTE: We may never receive this node's measurements since
+	//       it is our rendezvous client, but we don't offer to be
+	//       its rendezvous server. This is why we check for
+	//       remote in the recommendations response rather than
+	//       the measurements.
+	//       This assumes that the node's reachability is indicative
+	//       of its ability to send us recommendation messages.
         return !n.isReachable || n.remoteFailures.contains(remote);
     }
 
@@ -1978,7 +1985,7 @@ public class NeuRonNode extends Thread {
         NodeState src = nodes.get(m.src);
         for (int i = 0; i < m.probeTable.length; i++)
             src.latencies.put(memberNids.get(i), m.probeTable[i]);
-        // NOTE we aren't setting node.{hop,cameUp,isHopRecommended=false}...
+        // TODO we aren't setting node.{hop,cameUp,isHopRecommended=false}...
     }
 
     private void handleRecommendations(RoutingRecs msg) {
