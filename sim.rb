@@ -9,6 +9,7 @@ basedir = "."
 datadir = if debug then "#{basedir}/data2" else "#{basedir}/data" end
 graphdir = "#{basedir}/graphs"
 tmpdir = '/tmp'
+neighborBroadcastPeriod = 30
 
 valid_cmds = [
   'run-nofailures',
@@ -44,7 +45,8 @@ when 'failures'
   end
 when 'nofailures'
   failure_rate_range = [0]
-  num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150]
+  #num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150]
+  num_nodes_range = [160, 170, 180, 190, 200]
   num_runs = 1
   schemes = ["simple", "sqrt"]
   scheme_labels = ["RON", "RON with new routing algorithm"]
@@ -78,9 +80,15 @@ end
 $num_runs = num_runs
 $get_subdir = get_subdir
 $datadir = datadir
+$neighborBroadcastPeriod = neighborBroadcastPeriod
 def agg_runs(scheme, num_nodes, failure_rate, xs)
-  neighborBroadcastPeriod = 15
   datadir = $datadir
+  nbp = $neighborBroadcastPeriod 
+  if scheme.eql?("sqrt")
+         nbp /= 2 
+  end
+  puts nbp
+
   for run in 1..$num_runs
     subdir = eval $get_subdir
     puts subdir
@@ -99,7 +107,9 @@ def agg_runs(scheme, num_nodes, failure_rate, xs)
             bytes += fields[1].split(' ')[0].to_i
             rounds = rounds + 1
           end
-          rounds = rounds / 2
+          if scheme.eql?("sqrt")
+              rounds = rounds / 2
+          end
 
           if rounds == 0
               rounds = 1
@@ -116,10 +126,10 @@ def agg_runs(scheme, num_nodes, failure_rate, xs)
 
           #puts ping_bytes
           #xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
-          #puts (rounds * neighborBroadcastPeriod)
+          #puts (rounds * nbp)
           
-          bytes += ping_bytes
-          xs << (bytes.to_f * 8/1000) / (rounds * neighborBroadcastPeriod)
+          #bytes += ping_bytes
+          xs << (bytes.to_f * 8/1000) / (rounds * nbp)
         rescue
         end
       end
@@ -137,6 +147,11 @@ end
 case mode
 when 'run'
   for scheme in schemes
+    nbp = $neighborBroadcastPeriod 
+    if scheme.eql?("sqrt")
+         nbp /= 2 
+    end
+    puts nbp
     for num_nodes in num_nodes_range
       for failure_rate in failure_rate_range
         for run in 1..num_runs
@@ -158,7 +173,7 @@ when 'run'
           # run for all configs with the same failure data set.
           sys("./run.bash -DenableSubpings=false -DtotalTime=#{total_time} -DconsoleLogFilter=all" +
               " -DnumNodes=#{num_nodes} -Dscheme=#{scheme}" +
-              " -DprobePeriod=30 -DneighborBroadcastPeriod=30" +
+              " -DprobePeriod=30 -DneighborBroadcastPeriod=#{nbp}" +
               " #{extra_args}" +
               " -DlogFileBase=#{subdir}/ > /dev/null")
         end
