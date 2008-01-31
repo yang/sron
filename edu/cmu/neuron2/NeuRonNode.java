@@ -626,6 +626,14 @@ public class NeuRonNode extends Thread {
     private ArrayList<NodeState> getAllReachableNodes() {
         ArrayList<NodeState> nbrs = new ArrayList<NodeState>();
         for (NodeState n : otherNodes)
+	    // TODO: Results for R will be wrong. Semantics of isReachable are
+	    //       such that, if two nodes don't send each other link state
+	    //       announcements for some amount of time (i.e. the link is
+	    //       down), they will both set isReachable to false and then will
+	    //       never again set it to true. **Do not** change semantics of
+	    //       isReachable, because it is used in other ways too. We must
+	    //       split into two variables, one for whether we receive pings
+	    //       from the node, and another for if we receive measurements.
             if (n.isReachable)
                 nbrs.add(n);
         return nbrs;
