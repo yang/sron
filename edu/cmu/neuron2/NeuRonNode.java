@@ -2341,6 +2341,7 @@ class ShortShortMap {
 
 
 
+
 class NodeInfo  {
 	short id;
 	int port;
@@ -2400,18 +2401,18 @@ class Serialization {
 		if (false) {}
 
 		else if (obj.getClass() == NodeInfo.class) {
-			NodeInfo casted = (NodeInfo) obj; out.writeInt(0);
+			NodeInfo casted = (NodeInfo) obj; out.writeInt(((int) serVersion) << 8 | 0);
 			out.writeShort(casted.id);
 			out.writeInt(casted.port);
 			{ byte[] buf = casted.addr.getAddress(); out.writeInt(buf.length); out.write(buf); }
 		}
 		else if (obj.getClass() == Rec.class) {
-			Rec casted = (Rec) obj; out.writeInt(1);
+			Rec casted = (Rec) obj; out.writeInt(((int) serVersion) << 8 | 1);
 			out.writeShort(casted.dst);
 			out.writeShort(casted.via);
 		}
 		else if (obj.getClass() == Subprobe.class) {
-			Subprobe casted = (Subprobe) obj; out.writeInt(2);
+			Subprobe casted = (Subprobe) obj; out.writeInt(((int) serVersion) << 8 | 2);
 			out.writeLong(casted.time);
 			{ byte[] buf = casted.src.getAddress().getAddress(); out.writeInt(buf.length); out.write(buf); }
 			out.writeInt(casted.src.getPort());
@@ -2420,13 +2421,13 @@ class Serialization {
 			out.writeByte(casted.type);
 		}
 		else if (obj.getClass() == Msg.class) {
-			Msg casted = (Msg) obj; out.writeInt(3);
+			Msg casted = (Msg) obj; out.writeInt(((int) serVersion) << 8 | 3);
 			out.writeShort(casted.src);
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Join.class) {
-			Join casted = (Join) obj; out.writeInt(4);
+			Join casted = (Join) obj; out.writeInt(((int) serVersion) << 8 | 4);
 			{ byte[] buf = casted.addr.getAddress(); out.writeInt(buf.length); out.write(buf); }
 			out.writeInt(casted.port);
 			out.writeShort(casted.src);
@@ -2434,7 +2435,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Init.class) {
-			Init casted = (Init) obj; out.writeInt(5);
+			Init casted = (Init) obj; out.writeInt(((int) serVersion) << 8 | 5);
 			out.writeShort(casted.id);
 			out.writeInt(casted.members.size());
 			for (int i = 0; i < casted.members.size(); i++) {
@@ -2447,7 +2448,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Membership.class) {
-			Membership casted = (Membership) obj; out.writeInt(6);
+			Membership casted = (Membership) obj; out.writeInt(((int) serVersion) << 8 | 6);
 			out.writeInt(casted.members.size());
 			for (int i = 0; i < casted.members.size(); i++) {
 				out.writeShort(casted.members.get(i).id);
@@ -2461,7 +2462,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == RoutingRecs.class) {
-			RoutingRecs casted = (RoutingRecs) obj; out.writeInt(7);
+			RoutingRecs casted = (RoutingRecs) obj; out.writeInt(((int) serVersion) << 8 | 7);
 			out.writeInt(casted.recs.size());
 			for (int i = 0; i < casted.recs.size(); i++) {
 				out.writeShort(casted.recs.get(i).dst);
@@ -2472,7 +2473,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Ping.class) {
-			Ping casted = (Ping) obj; out.writeInt(8);
+			Ping casted = (Ping) obj; out.writeInt(((int) serVersion) << 8 | 8);
 			out.writeLong(casted.time);
 			out.writeShort(casted.info.id);
 			out.writeInt(casted.info.port);
@@ -2482,14 +2483,14 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Pong.class) {
-			Pong casted = (Pong) obj; out.writeInt(9);
+			Pong casted = (Pong) obj; out.writeInt(((int) serVersion) << 8 | 9);
 			out.writeLong(casted.time);
 			out.writeShort(casted.src);
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Measurements.class) {
-			Measurements casted = (Measurements) obj; out.writeInt(10);
+			Measurements casted = (Measurements) obj; out.writeInt(((int) serVersion) << 8 | 10);
 			out.writeInt(casted.probeTable.length);
 			for (int i = 0; i < casted.probeTable.length; i++) {
 				out.writeShort(casted.probeTable[i]);
@@ -2500,21 +2501,25 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == MemberPoll.class) {
-			MemberPoll casted = (MemberPoll) obj; out.writeInt(11);
+			MemberPoll casted = (MemberPoll) obj; out.writeInt(((int) serVersion) << 8 | 11);
 			out.writeShort(casted.src);
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == PeeringRequest.class) {
-			PeeringRequest casted = (PeeringRequest) obj; out.writeInt(12);
+			PeeringRequest casted = (PeeringRequest) obj; out.writeInt(((int) serVersion) << 8 | 12);
 			out.writeShort(casted.src);
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
 	}
 
+	public static byte serVersion = 1;
 	public Object deserialize(DataInputStream in) throws IOException {
-		switch (readInt(in)) {
+		int header = readInt(in);
+		if ((header & 0xff00) != ((int) serVersion) << 8) return null;
+		int msgtype = header & 0xff;
+		switch (msgtype) {
 
 		case 0: { // NodeInfo
 			NodeInfo obj;
@@ -2933,6 +2938,7 @@ class Serialization {
 
 	private byte[] readBuffer = new byte[4];
 
+	// read in a big-endian 4-byte integer
 	public int readInt(DataInputStream dis) throws IOException {
 		dis.readFully(readBuffer, 0, 4);
 		return (
@@ -3009,4 +3015,3 @@ class Serialization {
 	   }
 	   }*/
 }
-

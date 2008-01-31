@@ -4,3 +4,8 @@ Requirements:
 - SLF4J >= 1.3.0 http://www.slf4j.org/dist/slf4j-1.4.3.tar.gz
   - references: slf4j-api, slf4j-simple
 - Java 5
+
+The tool to regenerate the message type source code is `object-codegen` and is
+found here:
+
+https://assorted.svn.sourceforge.net/svnroot/assorted/object-codegen/trunk/src
