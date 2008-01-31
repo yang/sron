@@ -1868,16 +1868,22 @@ public class NeuRonNode extends Thread {
                     // We require that a recommended route (if not the direct
                     // route and if direct route is working) yield at least a
                     // 5% reduction in latency.
+
+		    // TODO (high priority): this logic is a bit odd. minhop cannot be src.info.id
+		    //                  because of the guard in the above for loop. However, it can
+		    //                  be dst.info.id. Why do we even check for minhop==src.info.id
+		    //                  here, if it can't be?
                     if (minhop == src.info.id ||
                             directLatency == resetLatency ||
                             min * directBonus < directLatency) {
+			// TODO (high priority): can you get a short overflow with above? directBonus is a double
                         rec.via = minhop;
                         recs.add(rec);
                     } else {
                         // At this point,
                         //   minhop != src.info.id &&
-                        //     src->dst is infinite &&
-                        //     src->dst * directBonus <= min
+                        //     src->dst is *not* infinite &&
+                        //     min * directBonus >= src->dst
                         // So, recommend the direct route, if that is working.
                         rec.via = dst.info.id;
                         recs.add(rec);
