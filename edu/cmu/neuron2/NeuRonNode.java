@@ -626,14 +626,6 @@ public class NeuRonNode extends Thread {
     private ArrayList<NodeState> getAllReachableNodes() {
         ArrayList<NodeState> nbrs = new ArrayList<NodeState>();
         for (NodeState n : otherNodes)
-	    // TODO: Results for R will be wrong. Semantics of isReachable are
-	    //       such that, if two nodes don't send each other link state
-	    //       announcements for some amount of time (i.e. the link is
-	    //       down), they will both set isReachable to false and then will
-	    //       never again set it to true. **Do not** change semantics of
-	    //       isReachable, because it is used in other ways too. We must
-	    //       split into two variables, one for whether we receive pings
-	    //       from the node, and another for if we receive measurements.
             if (n.isReachable)
                 nbrs.add(n);
         return nbrs;
@@ -1105,6 +1097,7 @@ public class NeuRonNode extends Thread {
 
     private void resetTimeoutOnRendezvousClient(final short nid) {
         final NodeState node = nodes.get(nid);
+	// TODO: wrong semantics for isReachable
         if (!node.isReachable) return;
 
         ScheduledFuture<?> oldFuture = rendezvousClientTimeouts.get(nid);
@@ -1149,6 +1142,7 @@ public class NeuRonNode extends Thread {
                         log(nid + " unreachable");
                         node.isReachable = false;
                         nodes.get(myNid).latencies.remove(nid);
+			// TODO: do we really want this?
                         rendezvousClients.remove(node);
 
                         findPaths(node, false);
@@ -1438,6 +1432,7 @@ public class NeuRonNode extends Thread {
         rendezvousClients.clear();
         for (NodeState cli : nodeDefaultRSs.get(self)) {
 
+	    // TODO: wrong semantics for isReachable
             if (cli.isReachable && cli != self)
 		rendezvousClients.add(cli);
 	}
@@ -1515,6 +1510,7 @@ public class NeuRonNode extends Thread {
      * @return
      */
     private boolean isFailedRendezvous(NodeState n, NodeState remote) {
+	// TODO: isReachable semantics should be fixed (but how?)
         return !n.isReachable || n.remoteFailures.contains(remote);
     }
 
@@ -2027,24 +2023,24 @@ public class NeuRonNode extends Thread {
             }
         }
 
-	// This code is no longer operational. Not yet deleted in case we need similar soon.
-	//	if (scheme != RoutingScheme.SQRT_SPECIAL) {
-	//            /*
-	//             * get the full set of dsts that we depend on this node for. note
-	//             * that the set of nodes it's actually serving may be different.
-	//             */
-	//            for (NodeState dst : r.defaultClients) {
-	//                if (!r.dstsPresent.contains(dst.info.id)) {
-	//                    /*
-	//                     * there was a comm failure between this rendezvous and the
-	//                     * dst for which this rendezvous did not provide a
-	//                     * recommendation. consider this a rendezvous failure, so that if
-	//                     * necessary during the next phase, we will find failovers.
-	//                     */
-	//                    r.remoteFailures.add(dst);
-	//                }
-	//            }
-	//        }
+	if (scheme != RoutingScheme.SQRT_SPECIAL) {
+	    /*
+	     * get the full set of dsts that we depend on this node for. note
+	     * that the set of nodes it's actually serving may be different.
+	     */
+	    
+	    for (NodeState dst : r.defaultClients) {
+		if (!r.dstsPresent.contains(dst.info.id)) {
+		    /*
+		     * there was a comm failure between this rendezvous and the
+		     * dst for which this rendezvous did not provide a
+		     * recommendation. consider this a rendezvous failure, so that if
+		     * necessary during the next phase, we will find failovers.
+		     */
+		    r.remoteFailures.add(dst);
+		}
+	    }
+	}
     }
 
     /**
@@ -2099,6 +2095,10 @@ public class NeuRonNode extends Thread {
                 node.hop = 0;
             }
         }
+
+	// Unless node.hop == 0, this code below is useless
+	// We would like to measure this...
+	//   keep track of subping.
 
         // direct hop
         if (node.isReachable) {
