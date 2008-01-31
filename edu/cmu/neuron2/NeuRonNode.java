@@ -2023,24 +2023,24 @@ public class NeuRonNode extends Thread {
             }
         }
 
-	if (scheme != RoutingScheme.SQRT_SPECIAL) {
+	//	if (scheme != RoutingScheme.SQRT_SPECIAL) {
 	    /*
 	     * get the full set of dsts that we depend on this node for. note
 	     * that the set of nodes it's actually serving may be different.
 	     */
 	    
-	    for (NodeState dst : r.defaultClients) {
-		if (!r.dstsPresent.contains(dst.info.id)) {
+	//	    for (NodeState dst : r.defaultClients) {
+	//		if (!r.dstsPresent.contains(dst.info.id)) {
 		    /*
 		     * there was a comm failure between this rendezvous and the
 		     * dst for which this rendezvous did not provide a
 		     * recommendation. consider this a rendezvous failure, so that if
 		     * necessary during the next phase, we will find failovers.
 		     */
-		    r.remoteFailures.add(dst);
-		}
-	    }
-	}
+	//		    r.remoteFailures.add(dst);
+	//		}
+	//	    }
+	//	}
     }
 
     /**
