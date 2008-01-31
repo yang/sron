@@ -2024,7 +2024,7 @@ public class NeuRonNode extends Thread {
 	     * get the full set of dsts that we depend on this node for. note
 	     * that the set of nodes it's actually serving may be different.
 	     */
-	    // TODO (low priority): change logic to keep track of who you hear from
+	    // TODO (low priority): just use dstsPresent instead of remoteFailures
 	    for (NodeState dst : nodeDefaultRSs.get(r)) {
 		if (!r.dstsPresent.contains(dst.info.id)) {
 		    /*
