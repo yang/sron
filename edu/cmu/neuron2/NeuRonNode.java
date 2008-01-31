@@ -1247,21 +1247,26 @@ public class NeuRonNode extends Thread {
 			resetTimeoutAtNode(node.id);
 		}
 
+	    // Remove nodes. We need toRemove to avoid
+            // ConcurrentModificationException on the table that we'd be looping
+            // through.
 
-	    // remove nodes
-
-	    for (Map.Entry<Short,NodeState> entry : nodes.entrySet()) {
-		short nid = entry.getKey();
-		NodeState node = entry.getValue();
-		if (!newNids.contains(nid)) {
-                    // Remove the node from the subinterval during which it
-                    // was pinged.
-                    int index = pingId.get(node);
-                    pingId.remove(node);
-                    pingTable[index].remove(node);
-		    nodes.remove(nid);
-		}
-	    }
+            for (NodeInfo node : newNodes)
+                newNids.add(node.id);
+            HashSet<Pair<Short, NodeState>> toRemove = new HashSet<Pair<Short,NodeState>>();
+            for (Map.Entry<Short, NodeState> entry : nodes.entrySet())
+                if (!newNids.contains(entry.getKey()))
+                    toRemove.add(Pair.of(entry.getKey(), entry.getValue()));
+            for (Pair<Short, NodeState> pair : toRemove) {
+                int nid = pair.first;
+                NodeState node = pair.second();
+                // Remove the node from the subinterval during which it
+                // was pinged.
+                int index = pingId.get(node);
+                pingId.remove(node);
+                pingTable[index].remove(node);
+                nodes.remove(nid);
+            }
 	} // end synchronized
 
 
