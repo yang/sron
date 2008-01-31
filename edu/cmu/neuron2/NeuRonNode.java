@@ -104,6 +104,7 @@ public class NeuRonNode extends Thread {
     private NodeState[][] grid;
     private short numCols, numRows;
 
+    // Coord-only: maps addresses to nids
     private final Hashtable<InetAddress, Short> addr2id = new Hashtable<InetAddress, Short>();
 
     // Specific to this node. Lookup from destination to default rs's to it
@@ -692,27 +693,31 @@ public class NeuRonNode extends Thread {
             // forward the subpong back too; if we don't know him, no point in
             // sending a subping
             sendObject(subprobe(p.src, p.time, SUBPING_FWD), p.nod);
-            log("subprobe", "subping fwd from " + p.src + " to " + p.nod);
+//            log("subprobe", "subping fwd from " + p.src + " to " + p.nod);
         }
     }
 
     private void handleSubpingFwd(Subprobe p) {
         sendObject(subprobe(p.nod, p.time, SUBPONG), p.src);
-        log("subprobe", "subpong to " + p.nod + " via " + p.src);
+//        log("subprobe", "subpong to " + p.nod + " via " + p.src);
     }
 
     private void handleSubpong(Subprobe p) {
         sendObject(subprobe(p.src, p.time, SUBPONG_FWD), p.nod);
-        log("subprobe", "subpong fwd from " + p.src + " to " + p.nod);
+//        log("subprobe", "subpong fwd from " + p.src + " to " + p.nod);
     }
+
+    private final Hashtable<InetSocketAddress, NodeState> addr2node = new Hashtable<InetSocketAddress, NodeState>();
 
     private int addr2nid(InetSocketAddress a) {
-        return a.getPort() - basePort;
+        return addr2node.get(a).info.id;
     }
 
-    private void handleSubpongFwd(Subprobe p) {
-        long latency = (System.currentTimeMillis() - p.time) / 2;
-        log("subpong from " + addr2nid(p.nod) + " via " + addr2nid(p.src) + ": " + latency + ", time " + p.time);
+    private void handleSubpongFwd(Subprobe p, long receiveTime) {
+        long latency = (receiveTime - p.time) / 2;
+        synchronized (this) {
+            log("subpong from " + addr2nid(p.nod) + " via " + addr2nid(p.src) + ": " + latency + ", time " + p.time);
+        }
     }
 
     private void pingAll(int pingIter) {
@@ -936,16 +941,21 @@ public class NeuRonNode extends Thread {
             try {
                 Object obj = deserialize(buf);
                 if (obj == null) return;
+                long receiveTime;
                 if (obj instanceof Subprobe) {
                     Subprobe p = (Subprobe) obj;
                     switch (p.type) {
                         case SUBPING: handleSubping(p); break;
                         case SUBPING_FWD: handleSubpingFwd(p); break;
                         case SUBPONG: handleSubpong(p); break;
-                        case SUBPONG_FWD: handleSubpongFwd(p); break;
+                        case SUBPONG_FWD:
+                        // TODO move into the new worker thread when it's here
+                        receiveTime = System.currentTimeMillis();
+                        handleSubpongFwd(p, receiveTime);
+                        break;
                         default: assert false;
                     }
-                    return; // TODO early exit
+                    return; // TODO early exit is unclean
                 }
                 Msg msg = (Msg) obj;
                 synchronized (NeuRonNode.this) {
@@ -1243,6 +1253,7 @@ public class NeuRonNode extends Thread {
 		    pingId.put(newNode, loc);
 
 		    nodes.put(node.id, newNode);
+                    addr2node.put(new InetSocketAddress(node.addr, node.port), newNode);
 		    if (node.id != myNid)
 			resetTimeoutAtNode(node.id);
 		}
@@ -1265,6 +1276,7 @@ public class NeuRonNode extends Thread {
                 int index = pingId.get(node);
                 pingId.remove(node);
                 pingTable[index].remove(node);
+                addr2node.remove(new InetSocketAddress(node.info.addr, node.info.port));
                 nodes.remove(nid);
             }
 	} // end synchronized
