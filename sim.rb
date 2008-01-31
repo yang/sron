@@ -44,9 +44,12 @@ when 'failures'
   end
 when 'nofailures'
   failure_rate_range = [0]
-  num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160]
+  num_nodes_range = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150]
   num_runs = 1
   schemes = ["simple", "sqrt"]
+  scheme_labels = ["RON", "RON with new routing algorithm"]
+  #schemes = ["simple"]
+  #schemes = ["sqrt"]
 end
 
 def sys(cmd)
@@ -62,7 +65,7 @@ end
 
 get_subdir = '"#{datadir}/#{scheme}/n#{num_nodes}/f#{failure_rate}/r#{run}"'
 
-sys('make')
+#sys('make')
 
 def is_nonzero_int_and_file(x)
   begin
@@ -87,7 +90,7 @@ def agg_runs(scheme, num_nodes, failure_rate, xs)
         begin
           start_time = Integer(f.grep(/server started/)[0].split(' ', 2)[0])
           f.seek(0)
-          bytes, end_time = 0, 0
+          ping_bytes, bytes, end_time = 0, 0, 0
           rounds = 0
           f.grep(/sent (measurements|recs)/) do |line|
             fields = line.split(' ')
@@ -101,8 +104,21 @@ def agg_runs(scheme, num_nodes, failure_rate, xs)
           if rounds == 0
               rounds = 1
           end
+
+          f.seek(0)
+          f.grep(/sent ping_pongs/) do |line|
+            fields = line.split(' ')
+            end_time = Integer(fields[0])
+            fields = line.split(', ')
+            #puts #{fields[1]}
+            ping_bytes += fields[1].split(' ')[0].to_i
+          end
+
+          #puts ping_bytes
           #xs << (bytes.to_f * 8/1000) / ((end_time - start_time) / 1000.0)
           #puts (rounds * neighborBroadcastPeriod)
+          
+          bytes += ping_bytes
           xs << (bytes.to_f * 8/1000) / (rounds * neighborBroadcastPeriod)
         rescue
         end
@@ -142,7 +158,7 @@ when 'run'
           # run for all configs with the same failure data set.
           sys("./run.bash -DenableSubpings=false -DtotalTime=#{total_time} -DconsoleLogFilter=all" +
               " -DnumNodes=#{num_nodes} -Dscheme=#{scheme}" +
-              " -DprobePeriod=30 -DneighborBroadcastPeriod=15" +
+              " -DprobePeriod=30 -DneighborBroadcastPeriod=30" +
               " #{extra_args}" +
               " -DlogFileBase=#{subdir}/ > /dev/null")
         end
@@ -394,8 +410,10 @@ when 'plot'
     remkdir(graphdir)
     for gtype in ["monochrome", "color"]
       plots = []
+      i = 0
       for scheme in schemes
-        plots << "'#{datadir}/bandwidth-#{scheme}-nofailures.dat' using 1:2 with linespoints title '#{scheme}'"
+        plots << "'#{datadir}/bandwidth-#{scheme}-nofailures.dat' using 1:2 with linespoints title '#{scheme_labels[i]}'"
+        i += 1
       end
       plots = plots.join(', ')
 
@@ -404,9 +422,9 @@ when 'plot'
         set terminal postscript eps #{gtype}
         set size 0.65
         set output '#{graphdir}/bandwidth_#{gtype}.eps'
-        set title "Comparison of routing bandwidth overhead"
+        set title "Comparison of bandwidth overhead"
         set xlabel "number of nodes"
-        set ylabel "routing bandwidth overhead (Kbps)"
+        set ylabel "bandwidth overhead (Kbps)"
         set key left top
         plot #{plots}
       }
@@ -422,9 +440,11 @@ when 'plot'
       for num_nodes in [50]
           for gtype in ["monochrome", "color"]
           plots = []
+          i = 0
           for scheme in schemes
-            puts "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme}'"
-            plots << "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme}'"
+            puts "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme_labels[i]}'"
+            plots << "'#{datadir}/bw_#{num_nodes}_#{scheme}_all.dat' with yerrorbars title '#{scheme_labels[i]}'"
+            i += 1
           end
           plots = plots.join(', ')
 
