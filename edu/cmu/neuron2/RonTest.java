@@ -168,6 +168,18 @@ public class RonTest {
                     semAllJoined, null, coordinatorHost, coordNode, acceptor, reactor);
             node.run();
             nodes.add(node);
+
+            executor.submit(new Runnable() {
+                public void run() {
+                    Thread.currentThread().setName("reactor");
+                    try {
+                        reactor.react();
+                    } catch (Exception ex) {
+                        nodes.get(0).err(ex);
+                    }
+                }
+            });
+
             semAllJoined.acquire();
             if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
             break;

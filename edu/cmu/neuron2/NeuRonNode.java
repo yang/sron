@@ -124,10 +124,6 @@ public class NeuRonNode extends Thread {
 
     private final NodeInfo coordNode;
 
-    // DatagramSockets are thread-safe.
-    // http://www.velocityreviews.com/forums/t150685-is-datagramsocket-thread-safe.html
-    private final DatagramSocket sendSocket;
-
     private final RunMode mode;
     private final short numNodesHint;
     private final Semaphore semAllJoined;
@@ -189,9 +185,7 @@ public class NeuRonNode extends Thread {
         return new Runnable() {
             public void run() {
                 try {
-                    synchronized (NeuRonNode.this) {
-                        r.run();
-                    }
+                    r.run();
                 } catch (Throwable ex) {
                     err(ex);
                 }
@@ -317,8 +311,6 @@ public class NeuRonNode extends Thread {
             fh.setFormatter(fmt);
             createLabelFilter(props, "fileLogFilter", fh);
             logger.addHandler(fh);
-
-            sendSocket = new DatagramSocket();
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
@@ -476,6 +468,7 @@ public class NeuRonNode extends Thread {
     }
 
     private boolean hasJoined = false;
+    private Session session = null;
 
     public void run3() {
         if (isCoordinator) {
@@ -492,7 +485,7 @@ public class NeuRonNode extends Thread {
                             .getLocalHost(), basePort), new CoordReceiver());
                 } else {
                     final CoordHandler handler = new CoordHandler();
-                    reactor.register(null, myAddr, handler);
+                    session = reactor.register(null, myAddr, handler);
                 }
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
@@ -505,7 +498,7 @@ public class NeuRonNode extends Thread {
                                                 receiver);
                 } else {
                     final NodeHandler handler = new NodeHandler();
-                    reactor.register(null, myAddr, handler);
+                    session = reactor.register(null, myAddr, handler);
                 }
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
@@ -668,40 +661,38 @@ public class NeuRonNode extends Thread {
     }
 
     private void subping(int pingIter) {
-	// We will only subping a fraction of the nodes at this iteration
-	// Note: this synch. statement is redundant until we remove global lock
-	synchronized (pingTable) {
-	    List<Short> nids = new ArrayList<Short>();
-            int bytes = 0;
-            for (Object obj : pingTable[pingIter]) {
-                NodeState dst = (NodeState) obj;
-		// TODO: dst.hop almost always != 0 (except when dst is new node)
-                if (dst.info.id != myNid && dst.hop != 0) {
-                    NodeState hop = nodes.get(dst.hop);
-                    long time = System.currentTimeMillis();
-                    InetSocketAddress nod = new InetSocketAddress(
-                            dst.info.addr, dst.info.port);
-                    InetSocketAddress hopAddr = new InetSocketAddress(
-                            hop.info.addr, hop.info.port);
-                    bytes += sendObj(subprobe(nod, time, SUBPING), hopAddr);
-                    nids.add(dst.info.id);
-                }
+        // We will only subping a fraction of the nodes at this iteration
+        // Note: this synch. statement is redundant until we remove global lock
+        List<Short> nids = new ArrayList<Short>();
+        int bytes = 0;
+        for (Object obj : pingTable[pingIter]) {
+            NodeState dst = (NodeState) obj;
+            // TODO: dst.hop almost always != 0 (except when dst is new node)
+            if (dst.info.id != myNid && dst.hop != 0) {
+                NodeState hop = nodes.get(dst.hop);
+                long time = System.currentTimeMillis();
+                InetSocketAddress nod = new InetSocketAddress(dst.info.addr,
+                        dst.info.port);
+                InetSocketAddress hopAddr = new InetSocketAddress(
+                        hop.info.addr, hop.info.port);
+                bytes += sendObj(subprobe(nod, time, SUBPING), hopAddr);
+                nids.add(dst.info.id);
             }
+        }
 
-	    if(bytes > 0)
-		log("sent subpings " + bytes + " bytes, to " + nids);
-	}
+        if (bytes > 0)
+            log("sent subpings " + bytes + " bytes, to " + nids);
     }
 
     private final Serialization probeSer = new Serialization();
 
     private int sendObj(Object o, InetSocketAddress dst) {
         try {
-            // TODO investigate ByteBuffers
+            // TODO investigate directly writing to ByteBuffer
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             probeSer.serialize(o, new DataOutputStream(baos));
             byte[] buf = baos.toByteArray();
-            sendSocket.send(new DatagramPacket(buf, buf.length, dst));
+            session.send(ByteBuffer.wrap(buf), dst);
             return buf.length;
         } catch (Exception ex) {
             err(ex);
@@ -740,54 +731,54 @@ public class NeuRonNode extends Thread {
 
     private void handleSubpongFwd(Subprobe p, long receiveTime) {
         long latency = (receiveTime - p.time) / 2;
-        synchronized (this) {
-            log("subpong from " + addr2nid(p.nod) + " via " + addr2nid(p.src) + ": " + latency + ", time " + p.time);
-        }
+        log("subpong from " + addr2nid(p.nod) + " via " + addr2nid(p.src) + ": " + latency + ", time " + p.time);
     }
 
     private void pingAll(int pingIter) {
         log("pinging");
 
-	// We will only ping a fraction of the nodes at this iteration
-	// Note: this synch. statement is redundant until we remove global lock
-	synchronized(pingTable) {
+        // We will only ping a fraction of the nodes at this iteration
+        // Note: this synch. statement is redundant until we remove global lock
 
-	    PeerPing ping = new PeerPing();
-	    ping.time = System.currentTimeMillis();
-	    ping.src = myAddr;
-	    for (Object node : pingTable[pingIter]) {
-		NodeInfo info = ((NodeState)node).info;
-		if (info.id != myNid) {
-		    pingpongBytes += sendObj(ping, new InetSocketAddress(
-                            info.addr, info.port));
-                }
-	    }
-
-	    /* send ping to the membership server (co-ord) -
-	       this might not be required if everone makes their own local decision.
-	       i.e. each node notices that no other node can reach a node (say X),
-	       then each node sends the co-ord a msg saying that "i think X is dead".
-	       The sending of this msg can be staggered in time so that the co-ord is not flooded with mesgs.
-	       The co-ordinator can then make a decision on keeping or removing node Y from the membership.
-	       On seeing a subsequent msg from the co-ord that X has been removed from the overlay, if a node Y
-	       has not sent its "i think X is dead" msg, it can cancel this event.
-	    */
-
-	    // Only ping the coordinator once per ping interval (not per subinterval)
-	    if(pingIter == 0) {
-	        Ping p = new Ping();
-                p.time = System.currentTimeMillis();
-                NodeInfo tmp = nodes.get(myNid).info;
-                p.info = new NodeInfo();
-                p.info.id = origNid; // note that the ping info uses the
-                                        // original id
-                p.info.addr = tmp.addr;
-                p.info.port = tmp.port;
-
-                pingpongBytes += sendObject(p, (short) 0);
+        PeerPing ping = new PeerPing();
+        ping.time = System.currentTimeMillis();
+        ping.src = myAddr;
+        for (Object node : pingTable[pingIter]) {
+            NodeInfo info = ((NodeState) node).info;
+            if (info.id != myNid) {
+                pingpongBytes += sendObj(ping, new InetSocketAddress(info.addr,
+                        info.port));
             }
-	}
-        //log("sent pings, " + totalSize + " bytes");
+        }
+
+        /*
+         * send ping to the membership server (co-ord) - this might not be
+         * required if everone makes their own local decision. i.e. each node
+         * notices that no other node can reach a node (say X), then each node
+         * sends the co-ord a msg saying that "i think X is dead". The sending
+         * of this msg can be staggered in time so that the co-ord is not
+         * flooded with mesgs. The co-ordinator can then make a decision on
+         * keeping or removing node Y from the membership. On seeing a
+         * subsequent msg from the co-ord that X has been removed from the
+         * overlay, if a node Y has not sent its "i think X is dead" msg, it can
+         * cancel this event.
+         */
+
+        // Only ping the coordinator once per ping interval (not per
+        // subinterval)
+        if (pingIter == 0) {
+            Ping p = new Ping();
+            p.time = System.currentTimeMillis();
+            NodeInfo tmp = nodes.get(myNid).info;
+            p.info = new NodeInfo();
+            p.info.id = origNid; // note that the ping info uses the
+            // original id
+            p.info.addr = tmp.addr;
+            p.info.port = tmp.port;
+
+            pingpongBytes += sendObject(p, (short) 0);
+        }
+        // log("sent pings, " + totalSize + " bytes");
     }
 
     private Object deserialize(ByteBuffer buf) {
@@ -847,85 +838,83 @@ public class NeuRonNode extends Thread {
             try {
                 Msg msg = (Msg) deserialize(buf);
                 if (msg == null) return;
-                synchronized (NeuRonNode.this) {
-                    if (msg.session == sessionId) {
-                        if (msg instanceof Join) {
-                            final Join join = (Join) msg ;
-                            if (id2oid.values().contains(msg.src)) {
-                                // we already added this guy; just resend him the init msg
-                                sendInit(addr2id.get(join.addr), join);
-                            } else {
-                                // need to add this guy and send him the init msg (if there's space)
-                                if (!capJoins || coordNodes.size() < numNodesHint) {
-                                    short newNid = nidGen.next();
-                                    addMember(newNid, join.addr, join.port, join.src);
-                                    if (blockJoins) {
-                                        if (coordNodes.size() >= numNodesHint) {
-                                            // time to broadcast ims to everyone
-                                            ArrayList<NodeInfo> memberList = getMemberInfos();
-                                            for (NodeInfo m : memberList) {
-                                                Init im = new Init();
-                                                im.id = m.id;
-                                                im.members = memberList;
-                                                sendObject(im, m);
-                                            }
-                                        }
-                                    } else {
-                                        sendInit(newNid, join);
-                                        broadcastMembershipChange(newNid);
-                                    }
-
-                                    if (coordNodes.size() == numNodesHint) {
-                                        semAllJoined.release();
-                                    }
-                                } else if (capJoins && coordNodes.size() == numNodesHint) {
-                                    Init im = new Init();
-                                    im.id = -1;
-                                    im.members = new ArrayList<NodeInfo>();
-                                    sendObject(im, join.addr, join.port, (short)-1);
-                                }
-                            }
-                        } else if (coordNodes.containsKey(msg.src)) {
-                            log("recv." + msg.getClass().getSimpleName(), "from " +
-                                    msg.src + " (oid " + id2oid.get(msg.src) + ", "
-                                    + id2name.get(msg.src) + ")");
-                            resetTimeoutAtCoord(msg.src);
-                            if (msg.version < currentStateVersion) {
-                                // this includes joins
-                                log("updating stale membership");
-                                sendMembership(msg.src);
-                            } else if (msg instanceof Ping) {
-                                // ignore the ping
-                            } else {
-                                throw new Exception("can't handle message type here: " + msg.getClass().getName());
-                            }
+                if (msg.session == sessionId) {
+                    if (msg instanceof Join) {
+                        final Join join = (Join) msg ;
+                        if (id2oid.values().contains(msg.src)) {
+                            // we already added this guy; just resend him the init msg
+                            sendInit(addr2id.get(join.addr), join);
                         } else {
-                            if ((!capJoins || coordNodes.size() < numNodesHint) &&
-                                    msg instanceof Ping) {
-                                Ping ping = (Ping) msg;
-                                log("dead." + ping.getClass().getSimpleName(),
-                                        "from '" + ping.src + "' " + ping.info.addr.getHostName());
-
-                                Short mappedId = addr2id.get(ping.info.addr);
-                                short nid;
-                                if (mappedId == null) {
-                                    nid = nidGen.next();
-                                    addMember(nid, ping.info.addr,
-                                            ping.info.port, ping.info.id);
-                                    broadcastMembershipChange(nid);
+                            // need to add this guy and send him the init msg (if there's space)
+                            if (!capJoins || coordNodes.size() < numNodesHint) {
+                                short newNid = nidGen.next();
+                                addMember(newNid, join.addr, join.port, join.src);
+                                if (blockJoins) {
+                                    if (coordNodes.size() >= numNodesHint) {
+                                        // time to broadcast ims to everyone
+                                        ArrayList<NodeInfo> memberList = getMemberInfos();
+                                        for (NodeInfo m : memberList) {
+                                            Init im = new Init();
+                                            im.id = m.id;
+                                            im.members = memberList;
+                                            sendObject(im, m);
+                                        }
+                                    }
                                 } else {
-                                    nid = mappedId;
+                                    sendInit(newNid, join);
+                                    broadcastMembershipChange(newNid);
                                 }
 
+                                if (coordNodes.size() == numNodesHint) {
+                                    semAllJoined.release();
+                                }
+                            } else if (capJoins && coordNodes.size() == numNodesHint) {
                                 Init im = new Init();
-                                im.id = nid;
-                                im.src = myNid;
-                                im.version = currentStateVersion;
-                                im.members = getMemberInfos();
-                                sendObject(im, nid);
-                            } else {
-                                log("dead." + msg.getClass().getSimpleName(), "from '" + msg.src + "'");
+                                im.id = -1;
+                                im.members = new ArrayList<NodeInfo>();
+                                sendObject(im, join.addr, join.port, (short)-1);
                             }
+                        }
+                    } else if (coordNodes.containsKey(msg.src)) {
+                        log("recv." + msg.getClass().getSimpleName(), "from " +
+                                msg.src + " (oid " + id2oid.get(msg.src) + ", "
+                                + id2name.get(msg.src) + ")");
+                        resetTimeoutAtCoord(msg.src);
+                        if (msg.version < currentStateVersion) {
+                            // this includes joins
+                            log("updating stale membership");
+                            sendMembership(msg.src);
+                        } else if (msg instanceof Ping) {
+                            // ignore the ping
+                        } else {
+                            throw new Exception("can't handle message type here: " + msg.getClass().getName());
+                        }
+                    } else {
+                        if ((!capJoins || coordNodes.size() < numNodesHint) &&
+                                msg instanceof Ping) {
+                            Ping ping = (Ping) msg;
+                            log("dead." + ping.getClass().getSimpleName(),
+                                    "from '" + ping.src + "' " + ping.info.addr.getHostName());
+
+                            Short mappedId = addr2id.get(ping.info.addr);
+                            short nid;
+                            if (mappedId == null) {
+                                nid = nidGen.next();
+                                addMember(nid, ping.info.addr,
+                                        ping.info.port, ping.info.id);
+                                broadcastMembershipChange(nid);
+                            } else {
+                                nid = mappedId;
+                            }
+
+                            Init im = new Init();
+                            im.id = nid;
+                            im.src = myNid;
+                            im.version = currentStateVersion;
+                            im.members = getMemberInfos();
+                            sendObject(im, nid);
+                        } else {
+                            log("dead." + msg.getClass().getSimpleName(), "from '" + msg.src + "'");
                         }
                     }
                 }
@@ -995,99 +984,95 @@ public class NeuRonNode extends Thread {
                 } else if (obj instanceof PeerPong) {
                     PeerPong pong = (PeerPong) obj;
                     long rawRtt = System.currentTimeMillis() - pong.time;
-                    synchronized (NeuRonNode.this) {
-                        if (mode == RunMode.SIM) {
-                            short l = getSimLatency(addr2node.get(pong.src).info.id);
-                            if (l < resetLatency) {
-                                rawRtt = 2 * l;
-                            }
+                    if (mode == RunMode.SIM) {
+                        short l = getSimLatency(addr2node.get(pong.src).info.id);
+                        if (l < resetLatency) {
+                            rawRtt = 2 * l;
                         }
-                        NodeState state = addr2node.get(pong.src);
-                        // if the rtt was astronomical, just treat it as a dropped packet
-                        if (rawRtt / 2 < Short.MAX_VALUE) {
-                            // we define "latency" as rtt/2; this should be
-                            // a bigger point near the top of this file
-                            short latency = (short) (rawRtt / 2);
-                            short nid = state.info.id;
-                            if (state != null) {
-                                resetTimeoutAtNode(nid);
-                                NodeState self = nodes.get(myNid);
-                                short oldLatency = self.latencies.get(nid);
-                                final short ewma;
-                                if (oldLatency == resetLatency) {
-                                    ewma = latency;
-                                } else {
-                                    ewma = (short) (smoothingFactor * latency +
-                                            (1 - smoothingFactor) * oldLatency);
-                                }
-                                log("latency", state + " = " + latency +
-                                        ", ewma " + ewma + ", time " +
-                                        pong.time);
-                                self.latencies.put(nid, ewma);
+                    }
+                    NodeState state = addr2node.get(pong.src);
+                    // if the rtt was astronomical, just treat it as a dropped packet
+                    if (rawRtt / 2 < Short.MAX_VALUE) {
+                        // we define "latency" as rtt/2; this should be
+                        // a bigger point near the top of this file
+                        short latency = (short) (rawRtt / 2);
+                        short nid = state.info.id;
+                        if (state != null) {
+                            resetTimeoutAtNode(nid);
+                            NodeState self = nodes.get(myNid);
+                            short oldLatency = self.latencies.get(nid);
+                            final short ewma;
+                            if (oldLatency == resetLatency) {
+                                ewma = latency;
                             } else {
-                                log("latency", "some " + nid + " = " + latency);
+                                ewma = (short) (smoothingFactor * latency +
+                                        (1 - smoothingFactor) * oldLatency);
                             }
+                            log("latency", state + " = " + latency +
+                                    ", ewma " + ewma + ", time " +
+                                    pong.time);
+                            self.latencies.put(nid, ewma);
+                        } else {
+                            log("latency", "some " + nid + " = " + latency);
                         }
                     }
                     return; // TODO early exit is unclean
                 }
                 Msg msg = (Msg) obj;
-                synchronized (NeuRonNode.this) {
-                    if ((msg.src == 0 || nodes.containsKey(msg.src) || msg instanceof Ping)
-                            && msg.session == sessionId) {
-                        NodeState state = nodes.get(msg.src);
+                if ((msg.src == 0 || nodes.containsKey(msg.src) || msg instanceof Ping)
+                        && msg.session == sessionId) {
+                    NodeState state = nodes.get(msg.src);
 
-                        log("recv." + msg.getClass().getSimpleName(), "from "
-                                + msg.src + " len " + ((ByteBuffer) buf).limit());
+                    log("recv." + msg.getClass().getSimpleName(), "from "
+                            + msg.src + " len " + ((ByteBuffer) buf).limit());
 
-                        // for other messages, make sure their state version is
-                        // the same as ours
+                    // for other messages, make sure their state version is
+                    // the same as ours
 
-                        if (msg.version > currentStateVersion) {
-                            if (msg instanceof Membership && hasJoined) {
-                                currentStateVersion = msg.version;
-                                Membership m = (Membership) msg;
-                                assert myNid == m.yourId;
-                                updateMembers(m.members);
-                            } else if (msg instanceof Init) {
-                                hasJoined = true;
-                                if (semAllJoined != null)
-                                    semAllJoined.release();
-                                if (((Init) msg).id == -1)
-                                    session.close();
-                                handleInit((Init) msg);
-                            } else {
-                                // i am out of date - wait until i am updated
-                            }
-                        } else if (msg.version == currentStateVersion) {
-                            // from coordinator
-                            if (msg instanceof Membership) {
-                                Membership m = (Membership) msg;
-                                assert myNid == m.yourId;
-                                updateMembers(m.members);
-                            } else if (msg instanceof Measurements) {
-                                resetTimeoutOnRendezvousClient(msg.src);
-                                updateMeasurements((Measurements) msg);
-                            } else if (msg instanceof RoutingRecs) {
-                                RoutingRecs recs = (RoutingRecs) msg;
-                                handleRecommendations(recs);
-                                log("got recs " + routesToString(recs.recs));
-                            } else if (msg instanceof Ping ||
-                                       msg instanceof Pong ||
-                                       msg instanceof Init) {
-                                // nothing to do, already handled above
-                            } else {
-                                throw new Exception("can't handle that message type");
-                            }
+                    if (msg.version > currentStateVersion) {
+                        if (msg instanceof Membership && hasJoined) {
+                            currentStateVersion = msg.version;
+                            Membership m = (Membership) msg;
+                            assert myNid == m.yourId;
+                            updateMembers(m.members);
+                        } else if (msg instanceof Init) {
+                            hasJoined = true;
+                            if (semAllJoined != null)
+                                semAllJoined.release();
+                            if (((Init) msg).id == -1)
+                                session.close();
+                            handleInit((Init) msg);
                         } else {
-                            log("stale." + msg.getClass().getSimpleName(),
-                                    "from " + msg.src + " version "
-                                            + msg.version + " current "
-                                            + currentStateVersion);
+                            // i am out of date - wait until i am updated
+                        }
+                    } else if (msg.version == currentStateVersion) {
+                        // from coordinator
+                        if (msg instanceof Membership) {
+                            Membership m = (Membership) msg;
+                            assert myNid == m.yourId;
+                            updateMembers(m.members);
+                        } else if (msg instanceof Measurements) {
+                            resetTimeoutOnRendezvousClient(msg.src);
+                            updateMeasurements((Measurements) msg);
+                        } else if (msg instanceof RoutingRecs) {
+                            RoutingRecs recs = (RoutingRecs) msg;
+                            handleRecommendations(recs);
+                            log("got recs " + routesToString(recs.recs));
+                        } else if (msg instanceof Ping ||
+                                   msg instanceof Pong ||
+                                   msg instanceof Init) {
+                            // nothing to do, already handled above
+                        } else {
+                            throw new Exception("can't handle that message type");
                         }
                     } else {
-                        // log("ignored." + msg.getClass().getSimpleName(), "ignored from " + msg.src + " session " + msg.session);
+                        log("stale." + msg.getClass().getSimpleName(),
+                                "from " + msg.src + " version "
+                                        + msg.version + " current "
+                                        + currentStateVersion);
                     }
+                } else {
+                    // log("ignored." + msg.getClass().getSimpleName(), "ignored from " + msg.src + " session " + msg.session);
                 }
             } catch (Exception ex) {
                 err(ex);
@@ -1283,8 +1268,6 @@ public class NeuRonNode extends Thread {
 	    newNids.add(node.id);
 
 
-	synchronized(pingTable) {
-
 	    // add new nodes
 
 	    for (NodeInfo node : newNodes)
@@ -1304,27 +1287,26 @@ public class NeuRonNode extends Thread {
 		}
 
 	    // Remove nodes. We need toRemove to avoid
-            // ConcurrentModificationException on the table that we'd be looping
-            // through.
+        // ConcurrentModificationException on the table that we'd be looping
+        // through.
 
-            for (NodeInfo node : newNodes)
-                newNids.add(node.id);
-            HashSet<Pair<Short, NodeState>> toRemove = new HashSet<Pair<Short,NodeState>>();
-            for (Map.Entry<Short, NodeState> entry : nodes.entrySet())
-                if (!newNids.contains(entry.getKey()))
-                    toRemove.add(Pair.of(entry.getKey(), entry.getValue()));
-            for (Pair<Short, NodeState> pair : toRemove) {
-                short nid = pair.first;
-                NodeState node = pair.second;
-                // Remove the node from the subinterval during which it
-                // was pinged.
-                int index = pingId.remove(node);
-                pingTable[index].remove(node);
-                addr2node.remove(new InetSocketAddress(node.info.addr, node.info.port));
-                NodeState n = nodes.remove(nid);
-                assert n != null;
-            }
-	} // end synchronized
+        for (NodeInfo node : newNodes)
+            newNids.add(node.id);
+        HashSet<Pair<Short, NodeState>> toRemove = new HashSet<Pair<Short,NodeState>>();
+        for (Map.Entry<Short, NodeState> entry : nodes.entrySet())
+            if (!newNids.contains(entry.getKey()))
+                toRemove.add(Pair.of(entry.getKey(), entry.getValue()));
+        for (Pair<Short, NodeState> pair : toRemove) {
+            short nid = pair.first;
+            NodeState node = pair.second;
+            // Remove the node from the subinterval during which it
+            // was pinged.
+            int index = pingId.remove(node);
+            pingTable[index].remove(node);
+            addr2node.remove(new InetSocketAddress(node.info.addr, node.info.port));
+            NodeState n = nodes.remove(nid);
+            assert n != null;
+        }
 
 
         // consistency cleanups: check that all nid references are still valid nid's
@@ -1649,7 +1631,7 @@ public class NeuRonNode extends Thread {
 	    // if we believe that the node is not down
 	    // TODO (high priority): since dst.hop is never set to 0, this will always
 	    // be called, and we will always attempt to find a route to the
-	    // destination, even if there is a node failure. 
+	    // destination, even if there is a node failure.
 	    if (dst.hop != 0) {
 		// this is our current (active) set of rendezvous servers
 		HashSet<NodeState> rs = rendezvousServers.get(dst.info.id);
@@ -2036,7 +2018,7 @@ public class NeuRonNode extends Thread {
             log("send." + o.getClass().getSimpleName(),
                     "to " + who + " len " + buf.length);
             if (!ignored.contains(nid)) {
-                sendSocket.send(new DatagramPacket(buf, buf.length, addr, port));
+                session.send(ByteBuffer.wrap(buf), new InetSocketAddress(addr, port));
             } else {
                 log("droppng packet sent to " + who);
             }

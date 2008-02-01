@@ -16,6 +16,7 @@ public class Session {
     public final ReactorHandler handler;
     public final InetSocketAddress remoteSa, localSa;
     public final int index;
+//    public final ByteBuffer readBuf = ByteBuffer.allocate(4096);
     public final ByteBuffer readBuf = ByteBuffer.allocateDirect(4096);
     public final List<ByteBuffer> pendingWrites = new ArrayList<ByteBuffer>();
 
@@ -95,7 +96,8 @@ public class Session {
 
     public void send(ByteBuffer writeBuf, InetSocketAddress dst)
             throws Exception {
-        channel.send(writeBuf, dst);
+        int bytes = channel.send(writeBuf, dst);
+        assert bytes == writeBuf.limit();
     }
 
     public void close() throws Exception {
