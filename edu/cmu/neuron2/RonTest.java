@@ -130,16 +130,16 @@ public class RonTest {
                 NeuRonNode node = new NeuRonNode(i, props, numNodes,
                         i == 0 ? semAllJoined : null, myCachedAddr,
                         coordinatorHost, coordNode, acceptor, reactor);
-                node.run();
                 nodes.add(node);
+                node.run();
             }
 
             break;
         case DIST:
             NeuRonNode node = new NeuRonNode(nodeId, props, numNodes,
                     semAllJoined, null, coordinatorHost, coordNode, acceptor, reactor);
-            node.run();
             nodes.add(node);
+            node.run();
 
             break;
         }
