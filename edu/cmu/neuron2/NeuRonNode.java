@@ -1659,7 +1659,53 @@ public class NeuRonNode extends Thread {
 		    log("restored rendezvous server for " + dst + " from " + old + " to " + rs);
 		}
 
-		if (rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
+		// Note that rs not being empty means that in previous iterations the nodes in
+		// rs were alive, and either we did not ever receive any recommendations from them,
+		// or the last recommendation we received from it did include routing information
+		// for dst (and so there is no hint of a remote failure). In either case, as of
+		// the previous iteration, n.remoteFailures.contains(remote) == false.
+
+		// if { any node in rs has n.remoteFailures.contains(remote) == true, then we know that we
+		//   did receive a routing recommendation from it since the last round, and it is alive.
+		//   Remove it from rs and do nothing else this step, as the destination is likely dead.
+		//   set skipIteration=true. }
+		// else {
+		//   If !n.isReachable for any node n in rs, remove it from rs. We don't expect it to be
+		//     helpful for routing ever.
+		//   If rs is now empty, choose a failover rendezvous node (in this iteration)
+		//   Else, any remaining nodes have n.remoteFailures.contains(remote) == false, which means
+		//     either that we did not yet receive a routing message from it, or we did and the dst
+		//     is reachable. In either case, do nothing. If this node is still alive, we will
+		//     eventually receive a routing recommendation from it. Otherwise, very soon we will find
+		//     that !n.isReachable. We add a bit of latency for waiting, but should be okay.
+		// }
+
+		/*
+		 * If we think a remote failure could have occured, don't immediately look
+		 * for failovers. The next period, we will have received link states from
+		 * our neighbors, from which we can determine whether dst is just down.
+		 *
+		 * The reason for this is that if a node fails, we don't want the entire network to flood
+		 * the row/col of that downed node (no need for failovers period).
+		 */
+
+		boolean skipIteration = false;
+
+		// We use the iterator so that we can remove from the set safely
+		for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
+		    NodeState r = i.next();
+
+		    if(r.remoteFailures.contains(dst)) {
+			i.remove();
+			skipIteration = true;
+		    }
+		    else if(!r.isReachable) {
+			i.remove();
+		    }
+		}
+
+
+		if (!skipIteration && rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
 		    // create debug string
 		    String s = "defaults";
 		    for (NodeState r : defaults) {
@@ -1680,6 +1726,8 @@ public class NeuRonNode extends Thread {
 
 		    HashSet<NodeState> dstDefault = nodeDefaultRSs.get(dst);
 
+		    // currentRSs may contain rendezvous nodes which are no longer alive
+		    // or useful for reaching the destination
 		    for(NodeState f : currentRSs) {
 			if (dstDefault.contains(f) && !isFailedRendezvous(f, dst)) {
 			    cands.add(f);
@@ -1693,6 +1741,11 @@ public class NeuRonNode extends Thread {
 			// select a new failover. this is a blind choice;
 			// we don't have these node's routing recommendations,
 			// so we could not hope to do better.
+			// TODO (low priority): one exception is if any of the candidates
+			// are rendezvous clients for us, in which case we
+			// will have received their link state, and we could
+			// smartly decide whether they can reach the destination.
+			// Not obvious if we should (or how) take advantage of this.
 
 			for(NodeState cand : dstDefault) {
 			    if (cand != self && cand.isReachable)
@@ -1718,40 +1771,26 @@ public class NeuRonNode extends Thread {
 			NodeState failover = candsList.get(rand.nextInt(candsList.size()));
 			log("new failover for " + dst + ": " + failover + ", prev rs = " + rs + "; " + report);
 			rs.add(failover);
-			servers.add(failover);
 
 			// share this failover in this routing iteration too
 			if (!allDefaults.contains(failover)) {
 			    currentRSs.add(failover);
 			}
 		    }
-		} else {
-		    /*
-		     * when we remove nodes now, don't immediately look
-		     * for failovers. the next period, we will have
-		     * received link states from our neighbors, from
-		     * which we can determine whether dst is just down.
-		     *
-		     * the reason for this is that if a node fails, we
-		     * don't want the entire network to flood the row/col
-		     * of that downed node (no need for failovers period)
-		     */
-		    for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
-			NodeState r = i.next();
-			if (isFailedRendezvous(r, dst)) {
-			    i.remove();
-			} else {
-			    servers.add(r);
-			}
-		    }
-
-		    if (rs.isEmpty()) {
-			log("all rs to " + dst + " failed");
-			System.out.println("ALL FAILED!");
-		    }
 		}
-	    }
-        }
+		else if (rs.isEmpty()) {
+		    log("all rs to " + dst + " failed");
+		    System.out.println("ALL FAILED!");
+		}
+
+		// Add any nodes that are in rs to the servers set
+		for (NodeState r : rs) {
+		    servers.add(r);
+		}
+
+	    } // end if dst.hop != 0 (destination is alive)
+        } // end while loop over destinations
+
         ArrayList<NodeState> list = new ArrayList<NodeState>(servers);
         Collections.sort(list);
         return list;
