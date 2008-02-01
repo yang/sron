@@ -593,6 +593,8 @@ public class NeuRonNode extends Thread {
                     public void run() {
                         log("received/sent " + pingpongCount + " pings/pongs "
                                 + pingpongBytes + " bytes");
+                        log("received/sent " + subprobeCount + " subprobes "
+                                + subprobeBytes + " bytes");
                     }
                 }), pingDumpInitialDelay, pingDumpPeriod, TimeUnit.SECONDS);
 
@@ -677,11 +679,14 @@ public class NeuRonNode extends Thread {
                         hop.info.addr, hop.info.port);
                 bytes += sendObj(subprobe(nod, time, SUBPING), hopAddr);
                 nids.add(dst.info.id);
+                subprobeCount++;
             }
         }
 
-        if (bytes > 0)
+        if (bytes > 0) {
             log("sent subpings " + bytes + " bytes, to " + nids);
+            subprobeBytes += bytes;
+        }
     }
 
     private final Serialization probeSer = new Serialization();
@@ -938,8 +943,7 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    private int pingpongCount = 0;
-    private int pingpongBytes = 0;
+    private int pingpongCount, pingpongBytes, subprobeCount, subprobeBytes;
 
     public final class NodeHandler implements ReactorHandler {
 
@@ -963,6 +967,8 @@ public class NeuRonNode extends Thread {
                 long receiveTime;
                 if (obj instanceof Subprobe) {
                     Subprobe p = (Subprobe) obj;
+                    subprobeBytes += buf.limit();
+                    subprobeCount += 2;
                     switch (p.type) {
                         case SUBPING: handleSubping(p); break;
                         case SUBPING_FWD: handleSubpingFwd(p); break;
