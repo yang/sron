@@ -1312,6 +1312,10 @@ public class NeuRonNode extends Thread {
                     garbage.add(nid);
             for (short nid : garbage)
                 state.latencies.remove(nid);
+
+	    // Clear the remote failures hash, since this node will now have a different
+	    // set of default rendezvous nodes.
+	    state.remoteFailures.clear();
         }
 
         //
@@ -1491,7 +1495,8 @@ public class NeuRonNode extends Thread {
 	    }
 	}
 
-	// Initialize the per-destination rendezvous servers with the defaults
+	// Create empty set for default rendezvous servers, will be filled in
+	// getAllRendezvousServers()
         rendezvousServers.clear();
         for (Entry<Short, HashSet<NodeState>> entry : defaultRendezvousServers.entrySet()) {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
@@ -1769,6 +1774,7 @@ public class NeuRonNode extends Thread {
 			log("no failover candidates! giving up; " + report);
 		    } else {
 			NodeState failover = candsList.get(rand.nextInt(candsList.size()));
+			// TODO (low priority): prev rs = ... is now broken since rs is empty
 			log("new failover for " + dst + ": " + failover + ", prev rs = " + rs + "; " + report);
 			rs.add(failover);
 
