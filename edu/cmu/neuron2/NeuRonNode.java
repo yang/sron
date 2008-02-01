@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
@@ -572,10 +573,8 @@ public class NeuRonNode extends Thread {
 
                 scheduler.scheduleWithFixedDelay(safeRun(new Runnable() {
                     public void run() {
-                        log("received/sent " + pings + " pings/pongs");
-                        log("sent ping_pongs, " + pingpongTotalSize + " bytes, since last log");
-                        // benign race: no lock required as this is just a stat and we can be off by a little
-                        pingpongTotalSize = 0;
+                        log("received/sent " + pingpongCount + " pings/pongs "
+                                + pingpongBytes + " bytes");
                     }
                 }), pingDumpInitialDelay, pingDumpPeriod, TimeUnit.SECONDS);
 
@@ -658,7 +657,7 @@ public class NeuRonNode extends Thread {
                             dst.info.addr, dst.info.port);
                     InetSocketAddress hopAddr = new InetSocketAddress(
                             hop.info.addr, hop.info.port);
-                    bytes += sendObject(subprobe(nod, time, SUBPING), hopAddr);
+                    bytes += sendObj(subprobe(nod, time, SUBPING), hopAddr);
                     nids.add(dst.info.id);
                 }
             }
@@ -670,11 +669,11 @@ public class NeuRonNode extends Thread {
 
     private final Serialization probeSer = new Serialization();
 
-    private int sendObject(Subprobe p, InetSocketAddress dst) {
+    private int sendObj(Object o, InetSocketAddress dst) {
         try {
             // TODO investigate ByteBuffers
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            probeSer.serialize(p, new DataOutputStream(baos));
+            probeSer.serialize(o, new DataOutputStream(baos));
             byte[] buf = baos.toByteArray();
             sendSocket.send(new DatagramPacket(buf, buf.length, dst));
             return buf.length;
@@ -686,24 +685,24 @@ public class NeuRonNode extends Thread {
 
     private void handleSubping(Subprobe p) {
         if (myAddr.equals(p.nod)) {
-            sendObject(subprobe(p.nod, p.time, SUBPONG_FWD), p.src);
+            sendObj(subprobe(p.nod, p.time, SUBPONG_FWD), p.src);
             log("subprobe", "direct subpong from/to " + p.src);
         } else {
             // we also checked for p.src because eventually we'll need to
             // forward the subpong back too; if we don't know him, no point in
             // sending a subping
-            sendObject(subprobe(p.src, p.time, SUBPING_FWD), p.nod);
+            sendObj(subprobe(p.src, p.time, SUBPING_FWD), p.nod);
 //            log("subprobe", "subping fwd from " + p.src + " to " + p.nod);
         }
     }
 
     private void handleSubpingFwd(Subprobe p) {
-        sendObject(subprobe(p.nod, p.time, SUBPONG), p.src);
+        sendObj(subprobe(p.nod, p.time, SUBPONG), p.src);
 //        log("subprobe", "subpong to " + p.nod + " via " + p.src);
     }
 
     private void handleSubpong(Subprobe p) {
-        sendObject(subprobe(p.src, p.time, SUBPONG_FWD), p.nod);
+        sendObj(subprobe(p.src, p.time, SUBPONG_FWD), p.nod);
 //        log("subprobe", "subpong fwd from " + p.src + " to " + p.nod);
     }
 
@@ -727,17 +726,14 @@ public class NeuRonNode extends Thread {
 	// Note: this synch. statement is redundant until we remove global lock
 	synchronized(pingTable) {
 
-	    Ping ping = new Ping();
+	    PeerPing ping = new PeerPing();
 	    ping.time = System.currentTimeMillis();
-	    NodeInfo tmp = nodes.get(myNid).info;
-	    ping.info = new NodeInfo();
-	    ping.info.id = origNid; // note that the ping info uses the original id
-	    ping.info.addr = tmp.addr;
-	    ping.info.port = tmp.port;
+	    ping.src = myAddr;
 	    for (Object node : pingTable[pingIter]) {
-		short nid = ((NodeState)node).info.id;
-		if (nid != myNid) {
-		    pingpongTotalSize += sendObject(ping, nid);
+		NodeInfo info = ((NodeState)node).info;
+		if (info.id != myNid) {
+		    pingpongBytes += sendObj(ping, new InetSocketAddress(
+                            info.addr, info.port));
                 }
 	    }
 
@@ -753,7 +749,16 @@ public class NeuRonNode extends Thread {
 
 	    // Only ping the coordinator once per ping interval (not per subinterval)
 	    if(pingIter == 0) {
-		pingpongTotalSize += sendObject(ping, (short)0);
+	        Ping p = new Ping();
+                p.time = System.currentTimeMillis();
+                NodeInfo tmp = nodes.get(myNid).info;
+                p.info = new NodeInfo();
+                p.info.id = origNid; // note that the ping info uses the
+                                        // original id
+                p.info.addr = tmp.addr;
+                p.info.port = tmp.port;
+
+                pingpongBytes += sendObject(p, (short) 0);
             }
 	}
         //log("sent pings, " + totalSize + " bytes");
@@ -905,8 +910,8 @@ public class NeuRonNode extends Thread {
         }
     }
 
-    int pings = 0;
-    long pingpongTotalSize = 0;
+    private int pingpongCount = 0;
+    private int pingpongBytes = 0;
 
     /**
      * receiver's msg handling loop
@@ -939,6 +944,7 @@ public class NeuRonNode extends Thread {
         public void messageReceived(IoSession session, Object buf)
                 throws Exception {
             try {
+                // TODO check SimpleMsg.session
                 Object obj = deserialize(buf);
                 if (obj == null) return;
                 long receiveTime;
@@ -956,6 +962,52 @@ public class NeuRonNode extends Thread {
                         default: assert false;
                     }
                     return; // TODO early exit is unclean
+                } else if (obj instanceof PeerPing) {
+                    PeerPing ping = ((PeerPing) obj);
+                    PeerPong pong = new PeerPong();
+                    pong.time = ping.time;
+                    pong.src = myAddr;
+                    pingpongBytes += sendObj(pong, ping.src);
+                    pingpongCount++;
+                    return; // TODO early exit is unclean
+                } else if (obj instanceof PeerPong) {
+                    PeerPong pong = (PeerPong) obj;
+                    long rawRtt = System.currentTimeMillis() - pong.time;
+                    synchronized (NeuRonNode.this) {
+                        if (mode == RunMode.SIM) {
+                            short l = getSimLatency(addr2node.get(pong.src).info.id);
+                            if (l < resetLatency) {
+                                rawRtt = 2 * l;
+                            }
+                        }
+                        NodeState state = addr2node.get(pong.src);
+                        // if the rtt was astronomical, just treat it as a dropped packet
+                        if (rawRtt / 2 < Short.MAX_VALUE) {
+                            // we define "latency" as rtt/2; this should be
+                            // a bigger point near the top of this file
+                            short latency = (short) (rawRtt / 2);
+                            short nid = state.info.id;
+                            if (state != null) {
+                                resetTimeoutAtNode(nid);
+                                NodeState self = nodes.get(myNid);
+                                short oldLatency = self.latencies.get(nid);
+                                final short ewma;
+                                if (oldLatency == resetLatency) {
+                                    ewma = latency;
+                                } else {
+                                    ewma = (short) (smoothingFactor * latency +
+                                            (1 - smoothingFactor) * oldLatency);
+                                }
+                                log("latency", pong.src + " = " + latency +
+                                        ", ewma " + ewma + ", time " +
+                                        pong.time);
+                                self.latencies.put(nid, ewma);
+                            } else {
+                                log("latency", "some " + nid + " = " + latency);
+                            }
+                        }
+                    }
+                    return; // TODO early exit is unclean
                 }
                 Msg msg = (Msg) obj;
                 synchronized (NeuRonNode.this) {
@@ -965,49 +1017,6 @@ public class NeuRonNode extends Thread {
 
                         log("recv." + msg.getClass().getSimpleName(), "from "
                                 + msg.src + " len " + ((ByteBuffer) buf).limit());
-
-                        // always reply to pings and log pongs
-
-                        if (msg instanceof Ping) {
-                            Ping ping = ((Ping) msg);
-                            Pong pong = new Pong();
-                            pong.time = ping.time;
-                            pingpongTotalSize += sendObject(pong, ping.info);
-                            pings++;
-                        } else if (msg instanceof Pong) {
-                            Pong pong = (Pong) msg;
-                            long rawRtt = System.currentTimeMillis() - pong.time;
-                            if (mode == RunMode.SIM) {
-                                short l = getSimLatency(msg.src);
-                                if (l < resetLatency) {
-                                    rawRtt = 2 * l;
-                                }
-                            }
-                            // if the rtt was astronomical, just treat it as a dropped packet
-                            if (rawRtt / 2 < Short.MAX_VALUE) {
-                                // we define "latency" as rtt/2; this should be
-                                // a bigger point near the top of this file
-                                short latency = (short) (rawRtt / 2);
-                                if (state != null) {
-                                    resetTimeoutAtNode(pong.src);
-                                    NodeState self = nodes.get(myNid);
-                                    short oldLatency = self.latencies.get(pong.src);
-                                    final short ewma;
-                                    if (oldLatency == resetLatency) {
-                                        ewma = latency;
-                                    } else {
-                                        ewma = (short) (smoothingFactor * latency +
-                                                (1 - smoothingFactor) * oldLatency);
-                                    }
-                                    log("latency", pong.src + " = " + latency +
-                                            ", ewma " + ewma + ", time " +
-                                            pong.time);
-                                    self.latencies.put(pong.src, ewma);
-                                } else {
-                                    log("latency", "some " + pong.src + " = " + latency);
-                                }
-                            }
-                        }
 
                         // for other messages, make sure their state version is
                         // the same as ours
