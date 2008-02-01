@@ -70,7 +70,7 @@ class LabelFilter implements Filter {
 
 public class NeuRonNode extends Thread {
     private final ExecutorService executor;
-    private final ScheduledExecutorService scheduler;
+    private final Reactor scheduler;
     public short myNid;
     private final boolean isCoordinator;
     private final String coordinatorHost;
@@ -325,7 +325,7 @@ public class NeuRonNode extends Thread {
         }
 
         this.executor = executor;
-        this.scheduler = scheduler;
+        this.scheduler = reactor;
         grid = null;
         numCols = numRows = 0;
         isCoordinator = myNid == 0;

@@ -57,7 +57,8 @@ class Reactor {
             } else {
                 // TODO impose limit on # things to run at once (perhaps even
                 // specify costs)
-                while (!tasks.isEmpty() && tasks.peek().getDelay(TimeUnit.MILLISECONDS) == 0L) {
+                while (!tasks.isEmpty()
+                        && tasks.peek().getDelay(TimeUnit.MILLISECONDS) == 0L) {
                     ReactorTask task = tasks.remove();
                     task.run();
                 }
@@ -71,6 +72,16 @@ class Reactor {
                 + units.toMillis(delay));
         tasks.add(task);
         return task;
+    }
+
+    public ScheduledFuture<?> scheduleWithFixedDelay(final Runnable r,
+            final long initialDelay, final long delay, final TimeUnit units) {
+        return schedule(new Runnable() {
+            public void run() {
+                r.run();
+                Reactor.this.schedule(this, delay, units);
+            }
+        }, initialDelay, units);
     }
 
     public void shutdown() {

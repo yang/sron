@@ -25,7 +25,10 @@ public class ReactorTask implements ScheduledFuture<Void> {
     }
 
     public void run() {
-        r.run();
+        try {
+            r.run();
+        } catch (Exception ex) {
+        }
         state = TaskState.DONE;
     }
 
