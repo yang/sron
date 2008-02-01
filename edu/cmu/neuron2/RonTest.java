@@ -125,9 +125,9 @@ public class RonTest {
             }
 
             for (short i = 0; i <= numNodes; i++) {
-                NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
-                                                numNodes, i == 0 ? semAllJoined : null, myCachedAddr,
-                                                coordinatorHost, coordNode, acceptor, reactor);
+                NeuRonNode node = new NeuRonNode(i, props, numNodes,
+                        i == 0 ? semAllJoined : null, myCachedAddr,
+                        coordinatorHost, coordNode, acceptor, reactor);
                 node.run();
                 nodes.add(node);
             }
@@ -164,9 +164,8 @@ public class RonTest {
             sim(simData, nodes, scheduler);
             break;
         case DIST:
-            NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
-                                            props, numNodes, semAllJoined, null,
-                                            coordinatorHost, coordNode, acceptor, reactor);
+            NeuRonNode node = new NeuRonNode(nodeId, props, numNodes,
+                    semAllJoined, null, coordinatorHost, coordNode, acceptor, reactor);
             node.run();
             nodes.add(node);
             semAllJoined.acquire();
@@ -189,7 +188,6 @@ public class RonTest {
                 double stopTime = Double.parseDouble(parts[3]);
                 final ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
                     public void run() {
-                        //nodes.get(dst).ignore(src);
                         for (NeuRonNode node : nodes) {
                             if (node.myNid == src) {
                                 System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
@@ -206,7 +204,6 @@ public class RonTest {
                         if (!future.cancel(false)) {
                             for (NeuRonNode node : nodes) {
                                 if (node.myNid == src) {
-                                    //nodes.get(dst).unignore(src);
                                     node.unignore(dst);
                                 }
                                 else if (node.myNid == dst) {

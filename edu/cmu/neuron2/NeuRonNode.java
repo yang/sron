@@ -69,7 +69,6 @@ class LabelFilter implements Filter {
 }
 
 public class NeuRonNode extends Thread {
-    private final ExecutorService executor;
     private final Reactor scheduler;
     public short myNid;
     private final boolean isCoordinator;
@@ -208,7 +207,7 @@ public class NeuRonNode extends Thread {
 
     private final int joinDelay;
 
-    public NeuRonNode(short id, ExecutorService executor, ScheduledExecutorService scheduler,
+    public NeuRonNode(short id,
                         Properties props, short numNodes, Semaphore semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode,
                         DatagramAcceptor acceptor, Reactor reactor) {
@@ -324,7 +323,6 @@ public class NeuRonNode extends Thread {
             throw new RuntimeException(ex);
         }
 
-        this.executor = executor;
         this.scheduler = reactor;
         grid = null;
         numCols = numRows = 0;
