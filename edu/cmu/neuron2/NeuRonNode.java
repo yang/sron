@@ -358,7 +358,6 @@ public class NeuRonNode extends Thread {
         if (im.id == -1) {
             throw new PlannedException("network is full; aborting");
         }
-        System.out.println("Had nodeId = " + myNid + ". New nodeId = " + im.id);
         myNid = im.id;
         logger = Logger.getLogger("node_" + myNid);
         if (logger.getHandlers().length == 0) {
@@ -390,7 +389,7 @@ public class NeuRonNode extends Thread {
         logger.severe(msg);
     }
 
-    private void err(Throwable ex) {
+    public void err(Throwable ex) {
         StringWriter s = new StringWriter();
         PrintWriter p = new PrintWriter(s);
         ex.printStackTrace(p);
@@ -781,7 +780,6 @@ public class NeuRonNode extends Thread {
 
     private Object deserialize(ByteBuffer buf) {
         byte[] bytes = new byte[buf.limit()];
-        System.out.println(buf);
         buf.get(bytes);
         try {
             return new Serialization().deserialize(new DataInputStream(new
@@ -1303,7 +1301,6 @@ public class NeuRonNode extends Thread {
             for (Map.Entry<Short, NodeState> entry : nodes.entrySet())
                 if (!newNids.contains(entry.getKey()))
                     toRemove.add(Pair.of(entry.getKey(), entry.getValue()));
-            System.out.println(myNid + " removing nodes " + toRemove  + " from " + nodes + " newNids " + newNids);
             for (Pair<Short, NodeState> pair : toRemove) {
                 short nid = pair.first;
                 NodeState node = pair.second;

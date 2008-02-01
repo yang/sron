@@ -6,11 +6,13 @@ import java.nio.channels.Selector;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 class Reactor {
 
     private final Selector selector;
     private final List<Session> services = new ArrayList<Session>();
+    private AtomicBoolean doShutdown = new AtomicBoolean(false);
 
     public Reactor() throws Exception {
         selector = Selector.open();
@@ -25,9 +27,9 @@ class Reactor {
     public void react()
             throws Exception {
         while (true) {
-            System.out.println("selecting");
             selector.select();
-            System.out.println("selected");
+            if (doShutdown.get())
+                break;
 
             Set<SelectionKey> keys = selector.selectedKeys();
             for (SelectionKey key : keys) {
@@ -41,6 +43,15 @@ class Reactor {
             }
             keys.clear();
         }
+        selector.close();
+    }
+
+    /**
+     * Safe to call from any thread.
+     */
+    public void shutdown() {
+        doShutdown.set(true);
+        selector.wakeup();
     }
 
 }

@@ -122,7 +122,16 @@ public class RonTest {
                 nodes.add(node);
             }
 
-            reactor.react();
+            executor.submit(new Runnable() {
+                public void run() {
+                    Thread.currentThread().setName("reactor");
+                    try {
+                        reactor.react();
+                    } catch (Exception ex) {
+                        nodes.get(0).err(ex);
+                    }
+                }
+            });
 
             semAllJoined.acquire();
             if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
@@ -153,6 +162,7 @@ public class RonTest {
             scheduler.schedule(new Runnable() {
                 public void run() {
                     Logger.getLogger("").info("total time is up");
+                    reactor.shutdown();
                     scheduler.shutdown();
                     executor.shutdown();
                     System.exit(0);
