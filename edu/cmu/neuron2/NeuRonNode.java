@@ -1869,11 +1869,12 @@ public class NeuRonNode extends Thread {
                     // route and if direct route is working) yield at least a
                     // 5% reduction in latency.
 
-		    // TODO (high priority): this logic is a bit odd. minhop cannot be src.info.id
-		    //                  because of the guard in the above for loop. However, it can
-		    //                  be dst.info.id. Why do we even check for minhop==src.info.id
-		    //                  here, if it can't be?
-                    if (minhop == src.info.id ||
+		    // - if min-cost route is the direct route, just use it
+		    // - if direct-cost route is infinite, then no point
+		    //   comparing to the min-cost hop route
+		    // - if min-cost route is not much better than direct
+		    //   route, use direct route
+                    if (minhop == dst.info.id ||
                             directLatency == resetLatency ||
                             min * directBonus < directLatency) {
 			// TODO (high priority): can you get a short overflow with above? directBonus is a double
@@ -1881,7 +1882,7 @@ public class NeuRonNode extends Thread {
                         recs.add(rec);
                     } else {
                         // At this point,
-                        //   minhop != src.info.id &&
+                        //   min-cost route is not the direct route &&
                         //     src->dst is *not* infinite &&
                         //     min * directBonus >= src->dst
                         // So, recommend the direct route, if that is working.
@@ -2370,6 +2371,14 @@ class Subprobe  {
 	InetSocketAddress nod;
 	byte type;
 }
+class PeerPing  {
+	long time;
+	InetSocketAddress src;
+}
+class PeerPong  {
+	long time;
+	InetSocketAddress src;
+}
 class Msg  {
 	short src;
 	short version;
@@ -2402,10 +2411,6 @@ class Measurements extends Msg {
 	short[] probeTable;
 	byte[] inflation;
 }
-class MemberPoll extends Msg {
-}
-class PeeringRequest extends Msg {
-}
 
 class Serialization {
 
@@ -2433,14 +2438,26 @@ class Serialization {
 			out.writeInt(casted.nod.getPort());
 			out.writeByte(casted.type);
 		}
+		else if (obj.getClass() == PeerPing.class) {
+			PeerPing casted = (PeerPing) obj; out.writeInt(((int) serVersion) << 8 | 3);
+			out.writeLong(casted.time);
+			{ byte[] buf = casted.src.getAddress().getAddress(); out.writeInt(buf.length); out.write(buf); }
+			out.writeInt(casted.src.getPort());
+		}
+		else if (obj.getClass() == PeerPong.class) {
+			PeerPong casted = (PeerPong) obj; out.writeInt(((int) serVersion) << 8 | 4);
+			out.writeLong(casted.time);
+			{ byte[] buf = casted.src.getAddress().getAddress(); out.writeInt(buf.length); out.write(buf); }
+			out.writeInt(casted.src.getPort());
+		}
 		else if (obj.getClass() == Msg.class) {
-			Msg casted = (Msg) obj; out.writeInt(((int) serVersion) << 8 | 3);
+			Msg casted = (Msg) obj; out.writeInt(((int) serVersion) << 8 | 5);
 			out.writeShort(casted.src);
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Join.class) {
-			Join casted = (Join) obj; out.writeInt(((int) serVersion) << 8 | 4);
+			Join casted = (Join) obj; out.writeInt(((int) serVersion) << 8 | 6);
 			{ byte[] buf = casted.addr.getAddress(); out.writeInt(buf.length); out.write(buf); }
 			out.writeInt(casted.port);
 			out.writeShort(casted.src);
@@ -2448,7 +2465,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Init.class) {
-			Init casted = (Init) obj; out.writeInt(((int) serVersion) << 8 | 5);
+			Init casted = (Init) obj; out.writeInt(((int) serVersion) << 8 | 7);
 			out.writeShort(casted.id);
 			out.writeInt(casted.members.size());
 			for (int i = 0; i < casted.members.size(); i++) {
@@ -2461,7 +2478,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Membership.class) {
-			Membership casted = (Membership) obj; out.writeInt(((int) serVersion) << 8 | 6);
+			Membership casted = (Membership) obj; out.writeInt(((int) serVersion) << 8 | 8);
 			out.writeInt(casted.members.size());
 			for (int i = 0; i < casted.members.size(); i++) {
 				out.writeShort(casted.members.get(i).id);
@@ -2475,7 +2492,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == RoutingRecs.class) {
-			RoutingRecs casted = (RoutingRecs) obj; out.writeInt(((int) serVersion) << 8 | 7);
+			RoutingRecs casted = (RoutingRecs) obj; out.writeInt(((int) serVersion) << 8 | 9);
 			out.writeInt(casted.recs.size());
 			for (int i = 0; i < casted.recs.size(); i++) {
 				out.writeShort(casted.recs.get(i).dst);
@@ -2486,7 +2503,7 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Ping.class) {
-			Ping casted = (Ping) obj; out.writeInt(((int) serVersion) << 8 | 8);
+			Ping casted = (Ping) obj; out.writeInt(((int) serVersion) << 8 | 10);
 			out.writeLong(casted.time);
 			out.writeShort(casted.info.id);
 			out.writeInt(casted.info.port);
@@ -2496,14 +2513,14 @@ class Serialization {
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Pong.class) {
-			Pong casted = (Pong) obj; out.writeInt(((int) serVersion) << 8 | 9);
+			Pong casted = (Pong) obj; out.writeInt(((int) serVersion) << 8 | 11);
 			out.writeLong(casted.time);
 			out.writeShort(casted.src);
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
 		else if (obj.getClass() == Measurements.class) {
-			Measurements casted = (Measurements) obj; out.writeInt(((int) serVersion) << 8 | 10);
+			Measurements casted = (Measurements) obj; out.writeInt(((int) serVersion) << 8 | 12);
 			out.writeInt(casted.probeTable.length);
 			for (int i = 0; i < casted.probeTable.length; i++) {
 				out.writeShort(casted.probeTable[i]);
@@ -2513,21 +2530,9 @@ class Serialization {
 			out.writeShort(casted.version);
 			out.writeShort(casted.session);
 		}
-		else if (obj.getClass() == MemberPoll.class) {
-			MemberPoll casted = (MemberPoll) obj; out.writeInt(((int) serVersion) << 8 | 11);
-			out.writeShort(casted.src);
-			out.writeShort(casted.version);
-			out.writeShort(casted.session);
-		}
-		else if (obj.getClass() == PeeringRequest.class) {
-			PeeringRequest casted = (PeeringRequest) obj; out.writeInt(((int) serVersion) << 8 | 12);
-			out.writeShort(casted.src);
-			out.writeShort(casted.version);
-			out.writeShort(casted.session);
-		}
 	}
 
-	public static byte serVersion = 1;
+	public static byte serVersion = 2;
 	public Object deserialize(DataInputStream in) throws IOException {
 		int header = readInt(in);
 		if ((header & 0xff00) != ((int) serVersion) << 8) return null;
@@ -2629,7 +2634,71 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 3: { // Msg
+		case 3: { // PeerPing
+			PeerPing obj;
+			{
+				obj = new PeerPing();
+				{
+					obj.time = in.readLong();
+				}
+				{
+					InetAddress addr;
+					{
+						byte[] buf;
+						{
+
+							buf = new byte[readInt(in)];
+							in.read(buf);
+
+						}
+
+						addr = InetAddress.getByAddress(buf);
+
+					}
+					int port;
+					{
+						port = readInt(in);
+					}
+
+					obj.src = new InetSocketAddress(addr, port);
+
+				}
+			}
+			return obj;
+		}
+		case 4: { // PeerPong
+			PeerPong obj;
+			{
+				obj = new PeerPong();
+				{
+					obj.time = in.readLong();
+				}
+				{
+					InetAddress addr;
+					{
+						byte[] buf;
+						{
+
+							buf = new byte[readInt(in)];
+							in.read(buf);
+
+						}
+
+						addr = InetAddress.getByAddress(buf);
+
+					}
+					int port;
+					{
+						port = readInt(in);
+					}
+
+					obj.src = new InetSocketAddress(addr, port);
+
+				}
+			}
+			return obj;
+		}
+		case 5: { // Msg
 			Msg obj;
 			{
 				obj = new Msg();
@@ -2645,7 +2714,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 4: { // Join
+		case 6: { // Join
 			Join obj;
 			{
 				obj = new Join();
@@ -2678,7 +2747,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 5: { // Init
+		case 7: { // Init
 			Init obj;
 			{
 				obj = new Init();
@@ -2727,7 +2796,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 6: { // Membership
+		case 8: { // Membership
 			Membership obj;
 			{
 				obj = new Membership();
@@ -2779,7 +2848,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 7: { // RoutingRecs
+		case 9: { // RoutingRecs
 			RoutingRecs obj;
 			{
 				obj = new RoutingRecs();
@@ -2813,7 +2882,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 8: { // Ping
+		case 10: { // Ping
 			Ping obj;
 			{
 				obj = new Ping();
@@ -2855,7 +2924,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 9: { // Pong
+		case 11: { // Pong
 			Pong obj;
 			{
 				obj = new Pong();
@@ -2876,7 +2945,7 @@ class Serialization {
 			}
 			return obj;
 		}
-		case 10: { // Measurements
+		case 12: { // Measurements
 			Measurements obj;
 			{
 				obj = new Measurements();
@@ -2894,42 +2963,6 @@ class Serialization {
 					in.read(obj.inflation);
 
 				}
-				{
-					{
-						obj.src = in.readShort();
-					}
-					{
-						obj.version = in.readShort();
-					}
-					{
-						obj.session = in.readShort();
-					}
-				}
-			}
-			return obj;
-		}
-		case 11: { // MemberPoll
-			MemberPoll obj;
-			{
-				obj = new MemberPoll();
-				{
-					{
-						obj.src = in.readShort();
-					}
-					{
-						obj.version = in.readShort();
-					}
-					{
-						obj.session = in.readShort();
-					}
-				}
-			}
-			return obj;
-		}
-		case 12: { // PeeringRequest
-			PeeringRequest obj;
-			{
-				obj = new PeeringRequest();
 				{
 					{
 						obj.src = in.readShort();
