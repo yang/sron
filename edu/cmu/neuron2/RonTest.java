@@ -9,27 +9,20 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
-import edu.cmu.neuron2.NeuRonNode.PlannedException;
 import org.apache.mina.common.ThreadModel;
 import org.apache.mina.transport.socket.nio.DatagramAcceptor;
+
+import edu.cmu.neuron2.NeuRonNode.PlannedException;
 
 public class RonTest {
 
     public static enum RunMode { SIM, DIST }
-
-    private Semaphore semAllJoined;
-
-    public RonTest() {
-        semAllJoined = new Semaphore(0);
-    }
 
     public static void main(String[] args) throws Exception {
 
@@ -64,7 +57,6 @@ public class RonTest {
             props.load(new FileInputStream(config));
         }
 
-        final ExecutorService executor = Executors.newSingleThreadExecutor();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
         final Reactor reactor = new Reactor();
 
@@ -86,7 +78,7 @@ public class RonTest {
         short numNodes = Short.parseShort(props.getProperty("numNodes", "3"));
         short nodeId = Short.parseShort(props.getProperty("nodeId", "0"));
         RunMode mode = RunMode.valueOf(props.getProperty("mode", "sim").toUpperCase());
-        String simData = props.getProperty("simData", "");
+        final String simData = props.getProperty("simData", "");
 
         int basePort = Integer.parseInt(props.getProperty("basePort", mode == RunMode.SIM ? "15000" : "9000"));
         NodeInfo coordNode = new NodeInfo();
@@ -110,11 +102,21 @@ public class RonTest {
                 Logger.getLogger("").info("total time is up");
                 reactor.shutdown();
                 scheduler.shutdown();
-                executor.shutdown();
                 System.exit(0);
             }
         };
 
+        Runnable semAllJoined = new Runnable() {
+            public void run() {
+                if (nodes.get(0).failure.get() != null) {
+                    nodes.get(0).failure.get().printStackTrace();
+                    System.exit(1);
+                } else {
+                    System.out.println("All aboard !!!!!");
+                    sim(simData, nodes, reactor);
+                }
+            }
+        };
         switch (mode) {
         case SIM:
             InetAddress myCachedAddr;
@@ -132,36 +134,6 @@ public class RonTest {
                 nodes.add(node);
             }
 
-            // TODO totalTime watchdog has been moved to be exclusively for sim;
-            // restore for 'reality'
-            int totalTime = Integer.parseInt(props.getProperty("totalTime", "60"));
-            Logger.getLogger("").info((totalTime > 0 ? "" : "NOT ") +
-                    "scheduling total time watchdog");
-            if (totalTime > 0) {
-                reactor.schedule(watchdog, totalTime, TimeUnit.SECONDS);
-            }
-
-            executor.submit(new Runnable() {
-                public void run() {
-                    Thread.currentThread().setName("reactor");
-                    try {
-                        reactor.react();
-                    } catch (Exception ex) {
-                        nodes.get(0).err(ex);
-                    }
-                }
-            });
-
-            semAllJoined.acquire();
-            if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
-
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException ex) {
-                throw new RuntimeException(ex);
-            }
-
-            sim(simData, nodes, scheduler);
             break;
         case DIST:
             NeuRonNode node = new NeuRonNode(nodeId, props, numNodes,
@@ -169,63 +141,63 @@ public class RonTest {
             node.run();
             nodes.add(node);
 
-            executor.submit(new Runnable() {
-                public void run() {
-                    Thread.currentThread().setName("reactor");
-                    try {
-                        reactor.react();
-                    } catch (Exception ex) {
-                        nodes.get(0).err(ex);
-                    }
-                }
-            });
-
-            semAllJoined.acquire();
-            if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
             break;
         }
-        System.out.println("All aboard !!!!!");
+
+        int totalTime = Integer.parseInt(props.getProperty("totalTime", "60"));
+        Logger.getLogger("").info((totalTime > 0 ? "" : "NOT ") +
+                "scheduling total time watchdog");
+        if (totalTime > 0) {
+            reactor.schedule(watchdog, totalTime, TimeUnit.SECONDS);
+        }
+
+        reactor.react();
     }
 
     private void sim(String datafile, final List<NeuRonNode> nodes,
-        ScheduledExecutorService scheduler) throws IOException {
-        if (!datafile.equals("")) {
-            BufferedReader reader = new BufferedReader(new FileReader(datafile));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(" ");
-                final short src = Short.parseShort(parts[0]);
-                final short dst = Short.parseShort(parts[1]);
-                double startTime = Double.parseDouble(parts[2]);
-                double stopTime = Double.parseDouble(parts[3]);
-                final ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
-                    public void run() {
-                        for (NeuRonNode node : nodes) {
-                            if (node.myNid == src) {
-                                System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
-                                node.ignore(dst);
-                            } else if (node.myNid == dst) {
-                                System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
-                                node.ignore(src);
-                            }
-                        }
-                    }
-                }, (long) (startTime * 1000), TimeUnit.MILLISECONDS);
-                scheduler.schedule(new Runnable() {
-                    public void run() {
-                        if (!future.cancel(false)) {
+        Reactor scheduler) {
+        try {
+            if (!datafile.equals("")) {
+                BufferedReader reader = new BufferedReader(new FileReader(datafile));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(" ");
+                    final short src = Short.parseShort(parts[0]);
+                    final short dst = Short.parseShort(parts[1]);
+                    double startTime = Double.parseDouble(parts[2]);
+                    double stopTime = Double.parseDouble(parts[3]);
+                    final ScheduledFuture<?> future = scheduler.schedule(new Runnable() {
+                        public void run() {
                             for (NeuRonNode node : nodes) {
                                 if (node.myNid == src) {
-                                    node.unignore(dst);
-                                }
-                                else if (node.myNid == dst) {
-                                    node.unignore(src);
+                                    System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
+                                    node.ignore(dst);
+                                } else if (node.myNid == dst) {
+                                    System.out.println(node.myNid + " : <" + src + ", " + dst + ">");
+                                    node.ignore(src);
                                 }
                             }
                         }
-                    }
-                }, (long) (stopTime * 1000), TimeUnit.MILLISECONDS);
+                    }, (long) (startTime * 1000), TimeUnit.MILLISECONDS);
+                    scheduler.schedule(new Runnable() {
+                        public void run() {
+                            if (!future.cancel(false)) {
+                                for (NeuRonNode node : nodes) {
+                                    if (node.myNid == src) {
+                                        node.unignore(dst);
+                                    }
+                                    else if (node.myNid == dst) {
+                                        node.unignore(src);
+                                    }
+                                }
+                            }
+                        }
+                    }, (long) (stopTime * 1000), TimeUnit.MILLISECONDS);
+                }
             }
+        } catch (IOException ex) {
+            ex.printStackTrace();
+            System.exit(1);
         }
     }
 

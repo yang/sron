@@ -126,7 +126,7 @@ public class NeuRonNode extends Thread {
 
     private final RunMode mode;
     private final short numNodesHint;
-    private final Semaphore semAllJoined;
+    private final Runnable semAllJoined;
 
     private final Random rand = new Random();
 
@@ -202,7 +202,7 @@ public class NeuRonNode extends Thread {
     private final int joinDelay;
 
     public NeuRonNode(short id,
-                        Properties props, short numNodes, Semaphore semJoined,
+                        Properties props, short numNodes, Runnable semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode,
                         DatagramAcceptor acceptor, Reactor reactor) {
 
@@ -423,11 +423,11 @@ public class NeuRonNode extends Thread {
         } catch (PlannedException ex) {
             warn(ex.getMessage());
             failure.set(ex);
-            if (semAllJoined != null) semAllJoined.release();
+            if (semAllJoined != null) semAllJoined.run();
         } catch (Exception ex) {
             err(ex);
             failure.set(ex);
-            if (semAllJoined != null) semAllJoined.release();
+            if (semAllJoined != null) semAllJoined.run();
         }
     }
 
@@ -617,7 +617,7 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }), joinDelay, TimeUnit.SECONDS);
-                if (semAllJoined != null) semAllJoined.release();
+                if (semAllJoined != null) semAllJoined.run();
             } catch (IOException ex) {
                 throw new RuntimeException(ex);
             }
@@ -866,7 +866,7 @@ public class NeuRonNode extends Thread {
                                 }
 
                                 if (coordNodes.size() == numNodesHint) {
-                                    semAllJoined.release();
+                                    semAllJoined.run();
                                 }
                             } else if (capJoins && coordNodes.size() == numNodesHint) {
                                 Init im = new Init();
@@ -1038,7 +1038,7 @@ public class NeuRonNode extends Thread {
                         } else if (msg instanceof Init) {
                             hasJoined = true;
                             if (semAllJoined != null)
-                                semAllJoined.release();
+                                semAllJoined.run();
                             if (((Init) msg).id == -1)
                                 session.close();
                             handleInit((Init) msg);
