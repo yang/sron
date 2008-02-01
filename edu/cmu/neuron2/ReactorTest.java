@@ -35,7 +35,7 @@ public class ReactorTest {
         clientSa = new InetSocketAddress(localhost, clientPort);
 
         final ReactorHandler handler = new ReactorHandler() {
-            public void handle(InetSocketAddress src, ByteBuffer buf) {
+            public void handle(Session service, InetSocketAddress src, ByteBuffer buf) {
                 System.out.println("received: " + buf);
             }
         };
@@ -58,7 +58,7 @@ public class ReactorTest {
                 try {
                     Reactor r = new Reactor();
                     ByteBuffer writeBuf = ByteBuffer.allocate(5);
-                    ReactorService s = r.register(null, clientSa, handler);
+                    Session s = r.register(null, clientSa, handler);
                     Thread.sleep(2000);
                     s.send(writeBuf, clientSa);
                     r.react();

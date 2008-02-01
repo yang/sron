@@ -10,14 +10,14 @@ import java.util.Set;
 class Reactor {
 
     private final Selector selector;
-    private final List<ReactorService> services = new ArrayList<ReactorService>();
+    private final List<Session> services = new ArrayList<Session>();
 
     public Reactor() throws Exception {
         selector = Selector.open();
     }
 
-    public ReactorService register(InetSocketAddress remoteSa, InetSocketAddress localSa, ReactorHandler handler) throws Exception {
-        ReactorService service = new ReactorService(remoteSa, localSa, handler, services.size(), selector);
+    public Session register(InetSocketAddress remoteSa, InetSocketAddress localSa, ReactorHandler handler) {
+        Session service = new Session(remoteSa, localSa, handler, services.size(), selector);
         services.add(service);
         return service;
     }
@@ -25,15 +25,17 @@ class Reactor {
     public void react()
             throws Exception {
         while (true) {
+            System.out.println("selecting");
             selector.select();
+            System.out.println("selected");
 
             Set<SelectionKey> keys = selector.selectedKeys();
             for (SelectionKey key : keys) {
                 if (key.isValid()) {
                     if (key.isReadable()) {
-                        ((ReactorService) key.attachment()).read(key);
+                        ((Session) key.attachment()).read(key);
                     } else if (key.isWritable()) {
-                        ((ReactorService) key.attachment()).write(key);
+                        ((Session) key.attachment()).write(key);
                     }
                 }
             }

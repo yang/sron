@@ -10,7 +10,7 @@ import java.nio.channels.Selector;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ReactorService {
+public class Session {
 
     public final DatagramChannel channel;
     public final ReactorHandler handler;
@@ -19,24 +19,28 @@ public class ReactorService {
     public final ByteBuffer readBuf = ByteBuffer.allocateDirect(4096);
     public final List<ByteBuffer> pendingWrites = new ArrayList<ByteBuffer>();
 
-    public ReactorService(InetSocketAddress remoteSa,
+    public Session(InetSocketAddress remoteSa,
             InetSocketAddress localSa, ReactorHandler handler, int index,
-            Selector selector) throws Exception {
+            Selector selector) {
         this.handler = handler;
         this.remoteSa = remoteSa;
         this.localSa = localSa;
         this.index = index;
 
-        channel = DatagramChannel.open();
-        channel.configureBlocking(false);
-        DatagramSocket socket = channel.socket();
-        socket.setReuseAddress(true);
-        if (localSa != null)
-            socket.bind(localSa);
-        if (remoteSa != null)
-            channel.connect(remoteSa);
+        try {
+            channel = DatagramChannel.open();
+            channel.configureBlocking(false);
+            DatagramSocket socket = channel.socket();
+            socket.setReuseAddress(true);
+            if (localSa != null)
+                socket.bind(localSa);
+            if (remoteSa != null)
+                channel.connect(remoteSa);
 
-        channel.register(selector, SelectionKey.OP_READ, this);
+            channel.register(selector, SelectionKey.OP_READ, this);
+        } catch (Exception ex) {
+            throw new RuntimeException(ex);
+        }
     }
 
     public void read(SelectionKey key) throws Exception {
@@ -55,7 +59,8 @@ public class ReactorService {
                     key.cancel();
                 }
             }
-            handler.handle(srcSa, readBuf);
+            readBuf.flip();
+            handler.handle(this, srcSa, readBuf);
             // recycle buffer
             readBuf.clear();
         } catch (IOException e) {
@@ -91,6 +96,10 @@ public class ReactorService {
     public void send(ByteBuffer writeBuf, InetSocketAddress dst)
             throws Exception {
         channel.send(writeBuf, dst);
+    }
+
+    public void close() throws Exception {
+        channel.close();
     }
 
 }

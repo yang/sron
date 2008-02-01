@@ -42,8 +42,9 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.*;
 import java.util.logging.Formatter;
+import java.nio.ByteBuffer;
 
-import org.apache.mina.common.ByteBuffer;
+//import org.apache.mina.common.ByteBuffer;
 import org.apache.mina.common.IoHandlerAdapter;
 import org.apache.mina.common.IoServiceConfig;
 import org.apache.mina.common.IoSession;
@@ -183,6 +184,8 @@ public class NeuRonNode extends Thread {
 
     private final int pingDumpPeriod, pingDumpInitialDelay;
 
+    private final Reactor reactor;
+
     private Runnable safeRun(final Runnable r) {
         return new Runnable() {
             public void run() {
@@ -208,7 +211,9 @@ public class NeuRonNode extends Thread {
     public NeuRonNode(short id, ExecutorService executor, ScheduledExecutorService scheduler,
                         Properties props, short numNodes, Semaphore semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode,
-                        DatagramAcceptor acceptor) {
+                        DatagramAcceptor acceptor, Reactor reactor) {
+
+        this.reactor = reactor;
 
         joinDelay = rand.nextInt(Integer.parseInt(props.getProperty("joinDelayRange", "1")));
 
@@ -485,16 +490,26 @@ public class NeuRonNode extends Thread {
                         //printGrid();
                     }
                 }), dumpPeriod, dumpPeriod);
-                acceptor.bind(new InetSocketAddress(InetAddress
-                        .getLocalHost(), basePort), new CoordReceiver());
+                if (false) {
+                    acceptor.bind(new InetSocketAddress(InetAddress
+                            .getLocalHost(), basePort), new CoordReceiver());
+                } else {
+                    final CoordHandler handler = new CoordHandler();
+                    reactor.register(null, myAddr, handler);
+                }
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
         } else {
             try {
-                final Receiver receiver = new Receiver();
-                acceptor.bind(new InetSocketAddress(myCachedAddr, myPort),
-                                            receiver);
+                if (false) {
+                    final Receiver receiver = new Receiver();
+                    acceptor.bind(new InetSocketAddress(myCachedAddr, myPort),
+                                                receiver);
+                } else {
+                    final NodeHandler handler = new NodeHandler();
+                    reactor.register(null, myAddr, handler);
+                }
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
@@ -764,9 +779,9 @@ public class NeuRonNode extends Thread {
         //log("sent pings, " + totalSize + " bytes");
     }
 
-    private Object deserialize(Object o) {
-        ByteBuffer buf = (ByteBuffer) o;
+    private Object deserialize(ByteBuffer buf) {
         byte[] bytes = new byte[buf.limit()];
+        System.out.println(buf);
         buf.get(bytes);
         try {
             return new Serialization().deserialize(new DataInputStream(new
@@ -783,7 +798,8 @@ public class NeuRonNode extends Thread {
     /**
      * coordinator's msg handling loop
      */
-    public final class CoordReceiver extends IoHandlerAdapter {
+    public final class CoordHandler implements ReactorHandler {
+
         /**
          * Generates non-repeating random sequence of short IDs, and keeps
          * track of how many are emitted.
@@ -817,10 +833,9 @@ public class NeuRonNode extends Thread {
         }
 
         @Override
-        public void messageReceived(IoSession session, Object obj)
-                throws Exception {
+        public void handle(Session session, InetSocketAddress src, java.nio.ByteBuffer buf) {
             try {
-                Msg msg = (Msg) deserialize(obj);
+                Msg msg = (Msg) deserialize(buf);
                 if (msg == null) return;
                 synchronized (NeuRonNode.this) {
                     if (msg.session == sessionId) {
@@ -910,13 +925,23 @@ public class NeuRonNode extends Thread {
         }
     }
 
+
+    /**
+     * coordinator's msg handling loop
+     */
+    public final class CoordReceiver extends IoHandlerAdapter {
+        @Override
+        public void messageReceived(IoSession session, Object obj)
+                throws Exception {
+            assert false;
+        }
+    }
+
     private int pingpongCount = 0;
     private int pingpongBytes = 0;
 
-    /**
-     * receiver's msg handling loop
-     */
-    public final class Receiver extends IoHandlerAdapter {
+    public final class NodeHandler implements ReactorHandler {
+
         public short getSimLatency(short nid) {
             long time = System.currentTimeMillis();
             for (SimEvent e : simEvents) {
@@ -929,8 +954,7 @@ public class NeuRonNode extends Thread {
         }
 
         @Override
-        public void messageReceived(IoSession session, Object buf)
-                throws Exception {
+        public void handle(Session session, InetSocketAddress src, ByteBuffer buf) {
             try {
                 // TODO check SimpleMsg.session
                 Object obj = deserialize(buf);
@@ -1058,6 +1082,18 @@ public class NeuRonNode extends Thread {
             } catch (Exception ex) {
                 err(ex);
             }
+        }
+
+    }
+
+    /**
+     * receiver's msg handling loop
+     */
+    public final class Receiver extends IoHandlerAdapter {
+        @Override
+        public void messageReceived(IoSession session, Object buf)
+                throws Exception {
+            assert false;
         }
     }
 

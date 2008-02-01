@@ -66,6 +66,8 @@ public class RonTest {
 
         final ExecutorService executor = Executors.newSingleThreadExecutor();
         final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+        final Reactor reactor = new Reactor();
+
         // periodically GC
         scheduler.scheduleWithFixedDelay(new Runnable() {
             public void run() {
@@ -115,10 +117,13 @@ public class RonTest {
             for (short i = 0; i <= numNodes; i++) {
                 NeuRonNode node = new NeuRonNode(i, executor, scheduler, props,
                                                 numNodes, i == 0 ? semAllJoined : null, myCachedAddr,
-                                                coordinatorHost, coordNode, acceptor);
+                                                coordinatorHost, coordNode, acceptor, reactor);
                 node.run();
                 nodes.add(node);
             }
+
+            reactor.react();
+
             semAllJoined.acquire();
             if (nodes.get(0).failure.get() != null) throw nodes.get(0).failure.get();
 
@@ -133,7 +138,7 @@ public class RonTest {
         case DIST:
             NeuRonNode node = new NeuRonNode(nodeId, executor, scheduler,
                                             props, numNodes, semAllJoined, null,
-                                            coordinatorHost, coordNode, acceptor);
+                                            coordinatorHost, coordNode, acceptor, reactor);
             node.run();
             nodes.add(node);
             semAllJoined.acquire();

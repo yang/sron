@@ -5,6 +5,6 @@ import java.nio.ByteBuffer;
 
 public interface ReactorHandler {
 
-    public void handle(InetSocketAddress src, ByteBuffer buf);
+    public void handle(Session session, InetSocketAddress src, ByteBuffer buf);
 
 }
