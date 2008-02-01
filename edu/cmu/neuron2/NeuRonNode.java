@@ -539,7 +539,8 @@ public class NeuRonNode extends Thread {
                              * interdependent. the fact that we do the path-finding
                              * first before the rendezvous servers is arbitrary.
                              */
-			    // TODO the below can be decoupled
+			    // TODO the below can be decoupled. Actually, with the current bug, node.hop isn't
+			    //    set and findPathsForAllNodes() doesn't actually do anything.
                             Pair<Integer, Integer> p = findPathsForAllNodes();
                             log(p.first
                                     + " live nodes, "
@@ -547,7 +548,19 @@ public class NeuRonNode extends Thread {
                                     + " avg paths, "
                                     + nodes.get(myNid).latencies.keySet()
                                             .size() + " direct paths");
-			    // TODO this can also be decoupled
+			    // TODO this can also be decoupled. However, we don't want too much time to pass
+			    // between calculating rendezvous servers and actually sending to them, since in
+			    // the mean time we will have received recommendations which hint at remote failures
+			    // etc. Also our notion of isReachable will have changed. For SIMPLE this is easy:
+			    // we can remove from the set any nodes that are no longer reachable. An ad-hoc
+			    // solution would be to run it just once and then check if the dst is reachable before
+			    // broadcasting. This might take longer in certain failure scenarios.
+			    // We can, before sending, check whether link is down or we received a more recent
+			    // measurement packing showing remote failure. If remote failure, we'd like to wait
+			    // anyway since dst might be down. Might be useless, but can still send measurements.
+			    // If link is down, just don't send anything. We'll try again in the next iteration.
+			    // SUMMARY: after constructing measRecips, put each destination onto the queue,
+			    //       and if when popped !dst.isReachable, just don't send.
                             ArrayList<NodeState> measRecips = scheme == RoutingScheme.SIMPLE ? getAllReachableNodes()
                                     : getAllRendezvousServers();
 			    // TODO this can also be decoupled, and also split up
@@ -662,6 +675,7 @@ public class NeuRonNode extends Thread {
             int bytes = 0;
             for (Object obj : pingTable[pingIter]) {
                 NodeState dst = (NodeState) obj;
+		// TODO: dst.hop almost always != 0 (except when dst is new node)
                 if (dst.info.id != myNid && dst.hop != 0) {
                     NodeState hop = nodes.get(dst.hop);
                     long time = System.currentTimeMillis();
@@ -1633,6 +1647,9 @@ public class NeuRonNode extends Thread {
         for (NodeState dst : otherNodes) {
 
 	    // if we believe that the node is not down
+	    // TODO (high priority): since dst.hop is never set to 0, this will always
+	    // be called, and we will always attempt to find a route to the
+	    // destination, even if there is a node failure. 
 	    if (dst.hop != 0) {
 		// this is our current (active) set of rendezvous servers
 		HashSet<NodeState> rs = rendezvousServers.get(dst.info.id);
