@@ -1691,7 +1691,7 @@ public class NeuRonNode extends Thread {
 
 		boolean skipIteration = false;
 
-		// We use the iterator so that we can remove from the set safely
+		// We use the iterator so that we can safely remove from the set
 		for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
 		    NodeState r = i.next();
 
