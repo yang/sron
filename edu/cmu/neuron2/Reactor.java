@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit;
 class Reactor {
 
     private final Selector selector;
-    private final List<Session> services = new ArrayList<Session>();
+    private final List<Session> sessions = new ArrayList<Session>();
     private boolean doShutdown = false;
     private final PriorityQueue<ReactorTask> tasks = new PriorityQueue<ReactorTask>();
 
@@ -23,10 +23,10 @@ class Reactor {
 
     public Session register(InetSocketAddress remoteSa,
             InetSocketAddress localSa, ReactorHandler handler) {
-        Session service = new Session(remoteSa, localSa, handler, services
+        Session session = new Session(remoteSa, localSa, handler, sessions
                 .size(), selector);
-        services.add(service);
-        return service;
+        sessions.add(session);
+        return session;
     }
 
     public void react() throws Exception {
