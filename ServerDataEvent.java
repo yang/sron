@@ -1,13 +1,13 @@
-import java.nio.channels.DatagramChannel;
+import java.nio.channels.SocketChannel;
 
 class ServerDataEvent {
-	public NioServer server;
-	public DatagramChannel socket;
-	public byte[] data;
+        public NioServer server;
+        public SocketChannel socket;
+        public byte[] data;
 
-	public ServerDataEvent(NioServer server, DatagramChannel socket, byte[] data) {
-		this.server = server;
-		this.socket = socket;
-		this.data = data;
-	}
+        public ServerDataEvent(NioServer server, SocketChannel socket, byte[] data) {
+                this.server = server;
+                this.socket = socket;
+                this.data = data;
+        }
 }
