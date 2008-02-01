@@ -7,6 +7,7 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class ReactorTest {
     ExecutorService e;
@@ -27,6 +28,14 @@ public class ReactorTest {
         });
     }
 
+    private Runnable makeRunnable(final int i) {
+        return new Runnable() {
+            public void run() {
+                System.out.println(i);
+            }
+        };
+    }
+
     public void test() throws Exception {
         InetAddress localhost = InetAddress.getLocalHost();
         int serverPort = 11111, clientPort = 22222;
@@ -35,7 +44,8 @@ public class ReactorTest {
         clientSa = new InetSocketAddress(localhost, clientPort);
 
         final ReactorHandler handler = new ReactorHandler() {
-            public void handle(Session service, InetSocketAddress src, ByteBuffer buf) {
+            public void handle(Session service, InetSocketAddress src,
+                    ByteBuffer buf) {
                 System.out.println("received: " + buf);
             }
         };
@@ -45,6 +55,11 @@ public class ReactorTest {
                 try {
                     Reactor r = new Reactor();
                     r.register(null, serverSa, handler);
+
+                    for (int i = 0; i < 10; i++)
+                        r.schedule(makeRunnable(i), 200 * i,
+                                TimeUnit.MILLISECONDS);
+
                     Thread.sleep(1000);
                     r.react();
                 } catch (Exception ex) {
@@ -71,9 +86,10 @@ public class ReactorTest {
         spawn(new Runnable() {
             public void run() {
                 try {
-                    byte[] writeBuf = new byte[] {0, 1, 2, 3};
+                    byte[] writeBuf = new byte[] { 0, 1, 2, 3 };
                     Thread.sleep(3000);
-                    new DatagramSocket().send(new DatagramPacket(writeBuf, writeBuf.length, serverSa));
+                    new DatagramSocket().send(new DatagramPacket(writeBuf,
+                            writeBuf.length, serverSa));
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }

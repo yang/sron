@@ -105,6 +105,16 @@ public class RonTest {
         DatagramAcceptor acceptor = new DatagramAcceptor();
         acceptor.getDefaultConfig().setThreadModel(ThreadModel.MANUAL);
 
+        Runnable watchdog = new Runnable() {
+            public void run() {
+                Logger.getLogger("").info("total time is up");
+                reactor.shutdown();
+                scheduler.shutdown();
+                executor.shutdown();
+                System.exit(0);
+            }
+        };
+
         switch (mode) {
         case SIM:
             InetAddress myCachedAddr;
@@ -120,6 +130,15 @@ public class RonTest {
                                                 coordinatorHost, coordNode, acceptor, reactor);
                 node.run();
                 nodes.add(node);
+            }
+
+            // TODO totalTime watchdog has been moved to be exclusively for sim;
+            // restore for 'reality'
+            int totalTime = Integer.parseInt(props.getProperty("totalTime", "60"));
+            Logger.getLogger("").info((totalTime > 0 ? "" : "NOT ") +
+                    "scheduling total time watchdog");
+            if (totalTime > 0) {
+                reactor.schedule(watchdog, totalTime, TimeUnit.SECONDS);
             }
 
             executor.submit(new Runnable() {
@@ -155,20 +174,6 @@ public class RonTest {
             break;
         }
         System.out.println("All aboard !!!!!");
-        int totalTime = Integer.parseInt(props.getProperty("totalTime", "60"));
-        Logger.getLogger("").info((totalTime > 0 ? "" : "NOT ") +
-                "scheduling total time watchdog");
-        if (totalTime > 0) {
-            scheduler.schedule(new Runnable() {
-                public void run() {
-                    Logger.getLogger("").info("total time is up");
-                    reactor.shutdown();
-                    scheduler.shutdown();
-                    executor.shutdown();
-                    System.exit(0);
-                }
-            }, totalTime, TimeUnit.SECONDS);
-        }
     }
 
     private void sim(String datafile, final List<NeuRonNode> nodes,

@@ -5,53 +5,76 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 class Reactor {
 
     private final Selector selector;
     private final List<Session> services = new ArrayList<Session>();
-    private AtomicBoolean doShutdown = new AtomicBoolean(false);
+    private boolean doShutdown = false;
+    private final PriorityQueue<ReactorTask> tasks = new PriorityQueue<ReactorTask>();
 
     public Reactor() throws Exception {
         selector = Selector.open();
     }
 
-    public Session register(InetSocketAddress remoteSa, InetSocketAddress localSa, ReactorHandler handler) {
-        Session service = new Session(remoteSa, localSa, handler, services.size(), selector);
+    public Session register(InetSocketAddress remoteSa,
+            InetSocketAddress localSa, ReactorHandler handler) {
+        Session service = new Session(remoteSa, localSa, handler, services
+                .size(), selector);
         services.add(service);
         return service;
     }
 
-    public void react()
-            throws Exception {
+    public void react() throws Exception {
         while (true) {
-            selector.select();
-            if (doShutdown.get())
+            if (doShutdown)
                 break;
 
-            Set<SelectionKey> keys = selector.selectedKeys();
-            for (SelectionKey key : keys) {
-                if (key.isValid()) {
-                    if (key.isReadable()) {
-                        ((Session) key.attachment()).read(key);
-                    } else if (key.isWritable()) {
-                        ((Session) key.attachment()).write(key);
+            int updated;
+            if (tasks.isEmpty()) {
+                updated = selector.select();
+            } else {
+                long t = tasks.peek().getDelay(TimeUnit.MILLISECONDS);
+                updated = t > 0 ? selector.select(t) : 0;
+            }
+
+            if (updated > 0) {
+                Set<SelectionKey> keys = selector.selectedKeys();
+                for (SelectionKey key : keys) {
+                    if (key.isValid()) {
+                        if (key.isReadable()) {
+                            ((Session) key.attachment()).read(key);
+                        } else if (key.isWritable()) {
+                            ((Session) key.attachment()).write(key);
+                        }
                     }
                 }
+                keys.clear();
+            } else {
+                // TODO impose limit on # things to run at once (perhaps even
+                // specify costs)
+                while (!tasks.isEmpty() && tasks.peek().getDelay(TimeUnit.MILLISECONDS) == 0L) {
+                    ReactorTask task = tasks.remove();
+                    task.run();
+                }
             }
-            keys.clear();
         }
         selector.close();
     }
 
-    /**
-     * Safe to call from any thread.
-     */
+    public ScheduledFuture<?> schedule(Runnable r, long delay, TimeUnit units) {
+        ReactorTask task = new ReactorTask(r, System.currentTimeMillis()
+                + units.toMillis(delay));
+        tasks.add(task);
+        return task;
+    }
+
     public void shutdown() {
-        doShutdown.set(true);
-        selector.wakeup();
+        doShutdown = true;
     }
 
 }
