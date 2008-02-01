@@ -998,7 +998,7 @@ public class NeuRonNode extends Thread {
                                     ewma = (short) (smoothingFactor * latency +
                                             (1 - smoothingFactor) * oldLatency);
                                 }
-                                log("latency", pong.src + " = " + latency +
+                                log("latency", state + " = " + latency +
                                         ", ewma " + ewma + ", time " +
                                         pong.time);
                                 self.latencies.put(nid, ewma);
