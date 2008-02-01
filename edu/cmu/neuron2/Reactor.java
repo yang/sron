@@ -69,7 +69,7 @@ class Reactor {
 
     public ScheduledFuture<?> schedule(Runnable r, long delay, TimeUnit units) {
         ReactorTask task = new ReactorTask(r, System.currentTimeMillis()
-                + units.toMillis(delay));
+                + units.toMillis(delay), this);
         tasks.add(task);
         return task;
     }
@@ -82,6 +82,10 @@ class Reactor {
                 Reactor.this.schedule(this, delay, units);
             }
         }, initialDelay, units);
+    }
+
+    public boolean cancel(ReactorTask task) {
+        return tasks.remove(task);
     }
 
     public void shutdown() {

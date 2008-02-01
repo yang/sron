@@ -746,6 +746,7 @@ public class NeuRonNode extends Thread {
         for (Object node : pingTable[pingIter]) {
             NodeInfo info = ((NodeState) node).info;
             if (info.id != myNid) {
+                pingpongCount++;
                 pingpongBytes += sendObj(ping, new InetSocketAddress(info.addr,
                         info.port));
             }
@@ -776,6 +777,7 @@ public class NeuRonNode extends Thread {
             p.info.addr = tmp.addr;
             p.info.port = tmp.port;
 
+            pingpongCount++;
             pingpongBytes += sendObject(p, (short) 0);
         }
         // log("sent pings, " + totalSize + " bytes");
@@ -978,8 +980,8 @@ public class NeuRonNode extends Thread {
                     PeerPong pong = new PeerPong();
                     pong.time = ping.time;
                     pong.src = myAddr;
-                    pingpongBytes += sendObj(pong, ping.src);
-                    pingpongCount++;
+                    pingpongBytes += sendObj(pong, ping.src) + buf.limit();
+                    pingpongCount += 2;
                     return; // TODO early exit is unclean
                 } else if (obj instanceof PeerPong) {
                     PeerPong pong = (PeerPong) obj;
@@ -1015,6 +1017,8 @@ public class NeuRonNode extends Thread {
                         } else {
                             log("latency", "some " + nid + " = " + latency);
                         }
+                        pingpongCount++;
+                        pingpongBytes += buf.limit();
                     }
                     return; // TODO early exit is unclean
                 }

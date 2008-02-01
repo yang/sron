@@ -12,6 +12,7 @@ public class ReactorTask implements ScheduledFuture<Void> {
 
     private final Runnable r;
     private final long time;
+    private final Reactor reactor;
 
     private static enum TaskState {
         WAITING, RUNNING, DONE, CANCELLED
@@ -19,23 +20,29 @@ public class ReactorTask implements ScheduledFuture<Void> {
 
     private TaskState state = TaskState.WAITING;
 
-    public ReactorTask(Runnable r, long time) {
+    public ReactorTask(Runnable r, long time, Reactor reactor) {
         this.r = r;
         this.time = time;
+        this.reactor = reactor;
     }
 
     public void run() {
-        try {
-            r.run();
-        } catch (Exception ex) {
+        if (state != TaskState.CANCELLED) {
+            assert state == TaskState.WAITING;
+            try {
+                r.run();
+            } catch (Exception ex) {
+            }
+            state = TaskState.DONE;
         }
-        state = TaskState.DONE;
     }
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
         if (state == TaskState.WAITING) {
             state = TaskState.CANCELLED;
+            boolean b = reactor.cancel(this);
+            assert b;
             return true;
         } else {
             return false;
