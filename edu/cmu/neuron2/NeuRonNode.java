@@ -917,18 +917,6 @@ public class NeuRonNode extends Thread {
      * receiver's msg handling loop
      */
     public final class Receiver extends IoHandlerAdapter {
-        @Override
-        public void sessionCreated(IoSession session) throws Exception {
-            // TODO Auto-generated method stub
-            super.sessionCreated(session);
-        }
-
-        @Override
-        public void sessionOpened(IoSession session) throws Exception {
-            // TODO Auto-generated method stub
-            super.sessionOpened(session);
-        }
-
         public short getSimLatency(short nid) {
             long time = System.currentTimeMillis();
             for (SimEvent e : simEvents) {

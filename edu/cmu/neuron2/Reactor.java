@@ -16,34 +16,48 @@ import java.util.Set;
 
 class Reactor {
 
-    private List<ByteBuffer> pendingWrites;
+    private final List<ByteBuffer> pendingWrites;
+    private final Selector selector;
+    private final DatagramChannel channel;
+    private final InetSocketAddress remoteSa, localSa;
+    private final ReactorHandler handler;
 
-    public Reactor() {
+    public Reactor(InetSocketAddress remoteSa, InetSocketAddress localSa, ReactorHandler handler) throws Exception {
         pendingWrites = new ArrayList<ByteBuffer>();
+        selector = Selector.open();
+        channel = DatagramChannel.open();
+        this.remoteSa = remoteSa;
+        this.localSa = localSa;
+        this.handler = handler;
+
+        channel.configureBlocking(false);
+        DatagramSocket socket = channel.socket();
+        socket.setReuseAddress(true);
+        log(localSa);
+        if (localSa != null)
+            socket.bind(localSa);
+        if (remoteSa != null)
+            channel.connect(remoteSa);
+        channel.register(selector, SelectionKey.OP_READ);
+
+        log("Listening on socket " + socket.getLocalAddress() + ":"
+                + socket.getLocalPort());
+
     }
 
     private void log(Object msg) {
         System.out.println(msg);
     }
 
-    public void react(InetSocketAddress remoteSa, InetSocketAddress bindSa)
+    public void send(ByteBuffer writeBuf, InetSocketAddress dst) throws Exception {
+        // selector.wakeup();
+        channel.send(writeBuf, dst);
+    }
+
+    public void react()
             throws Exception {
-        Selector selector = Selector.open();
+        final ByteBuffer readBuf = ByteBuffer.allocateDirect(4096);
 
-        // TODO only a single channel
-
-        DatagramChannel channel = DatagramChannel.open();
-        channel.configureBlocking(false);
-        DatagramSocket socket = channel.socket();
-        if (bindSa != null)
-            socket.bind(bindSa);
-        channel.connect(remoteSa);
-        channel.register(selector, SelectionKey.OP_READ);
-
-        log("Listening on socket " + socket.getLocalAddress() + ":"
-                + socket.getLocalPort());
-
-        ByteBuffer readBuf = ByteBuffer.allocate(4096);
         while (true) {
             selector.select();
 
@@ -51,18 +65,23 @@ class Reactor {
             for (SelectionKey key : keys) {
                 if (key.isValid()) {
                     if (key.isReadable()) {
-                        int numRead;
                         try {
-                            numRead = channel.read(readBuf);
-                            if (numRead == -1) {
-                                // Remote entity shut the socket down cleanly.
-                                // Do
-                                // the same from our end and cancel the channel.
-                                key.channel().close();
-                                key.cancel();
+                            InetSocketAddress srcSa = (InetSocketAddress) channel
+                                    .receive(readBuf);
+                            if (false) {
+                                int numRead = 0;
+                                if (numRead == -1) {
+                                    // Remote entity shut the socket down
+                                    // cleanly.
+                                    // Do
+                                    // the same from our end and cancel the
+                                    // channel.
+                                    key.channel().close();
+                                    key.cancel();
+                                }
                             }
                             // worker
-                            log(readBuf.limit());
+                            handler.handle(srcSa, readBuf);
                             // recycle buffer
                             readBuf.clear();
                         } catch (IOException e) {
