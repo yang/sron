@@ -43,9 +43,10 @@ public class ReactorTest {
         spawn(new Runnable() {
             public void run() {
                 try {
-                    Reactor s = new Reactor(null, serverSa, handler);
+                    Reactor r = new Reactor();
+                    r.register(null, serverSa, handler);
                     Thread.sleep(1000);
-                    s.react();
+                    r.react();
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
@@ -55,11 +56,12 @@ public class ReactorTest {
         spawn(new Runnable() {
             public void run() {
                 try {
+                    Reactor r = new Reactor();
                     ByteBuffer writeBuf = ByteBuffer.allocate(5);
-                    Reactor s = new Reactor(null, clientSa, handler);
+                    ReactorService s = r.register(null, clientSa, handler);
                     Thread.sleep(2000);
                     s.send(writeBuf, clientSa);
-                    s.react();
+                    r.react();
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
