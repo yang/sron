@@ -1195,6 +1195,7 @@ public class NeuRonNode extends Thread {
                 }
             }
             node.isReachable = true;
+	    node.isDead = false;
 
             ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
                 public void run() {
@@ -1661,11 +1662,7 @@ public class NeuRonNode extends Thread {
 	// iterate over all destination nodes that are not us
         for (NodeState dst : otherNodes) {
 
-	    // if we believe that the node is not down
-	    // TODO (high priority): since dst.hop is never set to 0, this will always
-	    // be called, and we will always attempt to find a route to the
-	    // destination, even if there is a node failure.
-	    if (dst.hop != 0) {
+	    if (!dst.isDead) {
 		// this is our current (active) set of rendezvous servers
 		HashSet<NodeState> rs = rendezvousServers.get(dst.info.id);
 
@@ -2123,8 +2120,10 @@ public class NeuRonNode extends Thread {
                 } else {
                     // blindly trust the recommendations
                     NodeState node = nodes.get(rec.dst);
-                    if (node.hop == 0)
+                    if (node.hop == 0 || node.isDead) {
                         node.cameUp = true;
+			node.isDead = false;
+		    }
                     node.isHopRecommended = true;
                     node.hop = rec.via;
                 }
@@ -2216,11 +2215,18 @@ public class NeuRonNode extends Thread {
                 min = self.latencies.get(node.info.id);
             }
         }
+	else {
+	    // If it is alive, we will set it to false in the next few lines
+	    node.isDead = true;
+	}
 
         // find best rendezvous client. (`clients` are all reachable.)
         for (NodeState client : clients) {
             int val = client.latencies.get(nid);
             if (val != resetLatency) {
+		if(!node.isReachable)
+		    node.isDead = false;
+
                 options.add(client);
                 val += self.latencies.get(client.info.id);
                 if (!node.isHopRecommended && val < min) {
@@ -2337,6 +2343,14 @@ public class NeuRonNode extends Thread {
          *  - cannot be nid if !isReachable
          */
         public short hop;
+
+
+	/**
+	 * Keeps track of whether any node (including ourself) receives measurements
+	 * to the destination. Only consider this if node.isReachable is false.
+	 */
+	public boolean isDead = false;
+
 
         /**
          * this is set at certain places where we determine that a node is
