@@ -35,6 +35,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -453,16 +454,29 @@ public class NeuRonNode extends Thread {
             }
         }, initialDelay, TimeUnit.SECONDS);
     }
-    private ScheduledFuture<?> safeScheduleMs(final Runnable r, long initialDelay, final long period) {
-        final long bufferTime = 0; // TODO parameterize?
+    private ScheduledFuture<?> safeScheduleMs(final Callable<Integer> r, final int maxPoints, long initialDelay, final long period) {
         return scheduler.schedule(new Runnable() {
             private long scheduledTime = -1;
             public void run() {
                 if (scheduledTime < 0) scheduledTime = System.currentTimeMillis();
-                r.run();
-                long now = System.currentTimeMillis();
-                scheduledTime = Math.max(scheduledTime + period, now + bufferTime);
-                scheduler.schedule(this, scheduledTime - now, TimeUnit.MILLISECONDS);
+                int points = 0;
+                while (true) {
+                    try {
+                        points += r.call();
+                    } catch (Exception ex) {
+                        err(ex);
+                    }
+                    long now = System.currentTimeMillis();
+                    scheduledTime = Math.max(scheduledTime + period, now);
+                    if (scheduledTime > now) {
+                        scheduler.schedule(this, scheduledTime - now, TimeUnit.MILLISECONDS);
+                        break;
+                    }
+                    if (points > maxPoints) {
+                        scheduler.schedule(this, now + period, TimeUnit.MILLISECONDS);
+                        break;
+                    }
+                }
             }
         }, initialDelay, TimeUnit.MILLISECONDS);
     }
@@ -513,16 +527,18 @@ public class NeuRonNode extends Thread {
 
 		int probeSubPeriod = (1000 * probePeriod) / numProbeIntervals;
 
-                safeScheduleMs(safeRun(new Runnable() {
+                safeScheduleMs(new Callable<Integer>() {
 			int pingIter = 0;
 
-			public void run() {
+			public Integer call() {
+			    int points = 0;
 			    if (hasJoined) {
-				pingAll(pingIter);
+				points += pingAll(pingIter);
 				pingIter = (pingIter + 1) % numProbeIntervals;
 			    }
+			    return 1;
 			}
-                }), 1234, probeSubPeriod);
+                }, 5, 1234, probeSubPeriod);
 
                 safeSchedule(safeRun(new Runnable() {
                     public void run() {
@@ -575,17 +591,18 @@ public class NeuRonNode extends Thread {
                 if (enableSubpings) {
 		    int subpingSubPeriod = (1000 * subpingPeriod) / numProbeIntervals;
 
-                    safeScheduleMs(safeRun(new Runnable() {
+                    safeScheduleMs(new Callable<Integer>() {
 
 			    int pingIter = 0;
 
-			    public void run() {
+			    public Integer call() {
 				if(hasJoined) {
 				    subping(pingIter);
 				    pingIter = (pingIter + 1) % numProbeIntervals;
 				}
+				return 1;
 			    }
-			}), 5521, subpingSubPeriod);
+			}, 5, 5521, subpingSubPeriod);
                     // TODO should these initial offsets be constants?
                 }
 
@@ -662,11 +679,11 @@ public class NeuRonNode extends Thread {
         return p;
     }
 
-    private void subping(int pingIter) {
+    private int subping(int pingIter) {
         // We will only subping a fraction of the nodes at this iteration
         // Note: this synch. statement is redundant until we remove global lock
         List<Short> nids = new ArrayList<Short>();
-        int bytes = 0;
+        int bytes = 0, initCount = subprobeCount;
         for (Object obj : pingTable[pingIter]) {
             NodeState dst = (NodeState) obj;
             // TODO: dst.hop almost always != 0 (except when dst is new node)
@@ -687,6 +704,8 @@ public class NeuRonNode extends Thread {
             log("sent subpings " + bytes + " bytes, to " + nids);
             subprobeBytes += bytes;
         }
+
+        return subprobeCount - initCount;
     }
 
     private final Serialization probeSer = new Serialization();
@@ -739,12 +758,13 @@ public class NeuRonNode extends Thread {
         log("subpong from " + addr2nid(p.nod) + " via " + addr2nid(p.src) + ": " + latency + ", time " + p.time);
     }
 
-    private void pingAll(int pingIter) {
+    private int pingAll(int pingIter) {
         log("pinging");
 
         // We will only ping a fraction of the nodes at this iteration
         // Note: this synch. statement is redundant until we remove global lock
 
+        int initCount = pingpongCount;
         PeerPing ping = new PeerPing();
         ping.time = System.currentTimeMillis();
         ping.src = myAddr;
@@ -786,6 +806,8 @@ public class NeuRonNode extends Thread {
             pingpongBytes += sendObject(p, (short) 0);
         }
         // log("sent pings, " + totalSize + " bytes");
+
+        return pingpongCount - initCount;
     }
 
     private Object deserialize(ByteBuffer buf) {

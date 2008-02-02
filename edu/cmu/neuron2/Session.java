@@ -16,13 +16,12 @@ public class Session {
     public final ReactorHandler handler;
     public final InetSocketAddress remoteSa, localSa;
     public final int index;
-//    public final ByteBuffer readBuf = ByteBuffer.allocate(4096);
+    // public final ByteBuffer readBuf = ByteBuffer.allocate(4096);
     public final ByteBuffer readBuf = ByteBuffer.allocateDirect(4096);
     public final List<ByteBuffer> pendingWrites = new ArrayList<ByteBuffer>();
 
-    public Session(InetSocketAddress remoteSa,
-            InetSocketAddress localSa, ReactorHandler handler, int index,
-            Selector selector) {
+    public Session(InetSocketAddress remoteSa, InetSocketAddress localSa,
+            ReactorHandler handler, int index, Selector selector) {
         this.handler = handler;
         this.remoteSa = remoteSa;
         this.localSa = localSa;
@@ -44,31 +43,45 @@ public class Session {
         }
     }
 
+    // read messages is the priority
     public void read(SelectionKey key) throws Exception {
-        try {
-            InetSocketAddress srcSa = (InetSocketAddress) channel
-                    .receive(readBuf);
-            if (false) {
-                int numRead = channel.read(readBuf);
-                if (numRead == -1) {
-                    // Remote entity shut the socket down
-                    // cleanly.
-                    // Do
-                    // the same from our end and cancel the
-                    // channel.
-                    key.channel().close();
-                    key.cancel();
+        while (true) {
+            try {
+                InetSocketAddress srcSa;
+
+                if (remoteSa == null) {
+                    srcSa = (InetSocketAddress) channel.receive(readBuf);
+                } else {
+                    int numRead = channel.read(readBuf);
+                    if (numRead == -1) {
+                        // Remote entity shut the socket down
+                        // cleanly.
+                        // Do
+                        // the same from our end and cancel the
+                        // channel.
+                        key.channel().close();
+                        key.cancel();
+                    }
+                    // TODO also handle numRead == 0
+                    srcSa = remoteSa;
                 }
+
+                if (srcSa == null) {
+                    break;
+                }
+
+                // after channel wrote to buf, set lim = pos, then pos = 0
+                readBuf.flip();
+                // callback
+                handler.handle(this, srcSa, readBuf);
+                // recycle buffer
+                readBuf.clear();
+            } catch (IOException e) {
+                // The remote forcibly closed the connection, cancel
+                // the selection key and close the channel.
+                key.cancel();
+                channel.close();
             }
-            readBuf.flip();
-            handler.handle(this, srcSa, readBuf);
-            // recycle buffer
-            readBuf.clear();
-        } catch (IOException e) {
-            // The remote forcibly closed the connection, cancel
-            // the selection key and close the channel.
-            key.cancel();
-            channel.close();
         }
     }
 
