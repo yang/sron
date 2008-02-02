@@ -1360,8 +1360,9 @@ public class NeuRonNode extends Thread {
 
 	// ABOVE IS INDEPENDENT OF GRID
 
-        numCols = (short) Math.ceil(Math.sqrt(nodes.size()));
-        numRows = (short) Math.ceil((double) nodes.size() / (double) numCols);
+	// numRows needs to be >= numCols
+        numRows = (short) Math.ceil(Math.sqrt(nodes.size()));
+        numCols = (short) Math.ceil((double) nodes.size() / (double) numCols);
         grid = new NodeState[numRows][numCols];
 
 	// These are used temporarily for setting up the defaults
