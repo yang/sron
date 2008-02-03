@@ -26,26 +26,10 @@ public class RonTest {
 
     public static void main(String[] args) throws Exception {
 
-        /*
-        Properties props = System.getProperties();
-        String config = System.getProperty("neuron.config");
-        if (config != null) {
-            props.load(new FileInputStream(config));
-        }
-        int numNodes = Integer.parseInt(props.getProperty("numNodes", "3"));
-        String filter = props.getProperty("logfilter");
-        NeuRonNode.RoutingScheme scheme = NeuRonNode.RoutingScheme.valueOf(props.getProperty("scheme", "SIMPLE").toUpperCase());
-
-        System.out.println("#nodes = " + numNodes + "; filter = " + filter + "; scheme = " + scheme);
-        //System.exit(0);
-        */
-
         RonTest rt = new RonTest();
         try {
             rt.run();
         } catch (PlannedException ex) {
-        //} catch (Exception ex) {
-        //     System.exit(7);
         }
     }
 

@@ -89,6 +89,11 @@ public class NeuRonNode extends Thread {
      */
 
     /**
+     * when to ping who
+     */
+    private final PriorityQueue<Pair<Long, NodeState>> pingQ = new PriorityQueue<Pair<Long,NodeState>>();
+
+    /**
      * maps nid to {the set of rendezvous servers to that nid}
      */
     private final Hashtable<Short, HashSet<NodeState>> rendezvousServers = new Hashtable<Short, HashSet<NodeState>>();
@@ -517,29 +522,6 @@ public class NeuRonNode extends Thread {
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
-		// Split up the probing period into many small intervals. In each
-		// interval we will ping a small fraction of the nodes.
-
-		numProbeIntervals =  numNodesHint / 3;
-		pingTable = new HashSet[numProbeIntervals];
-		for(int i=0; i<numProbeIntervals; i++)
-		    pingTable[i] = new HashSet();
-
-		int probeSubPeriod = (1000 * probePeriod) / numProbeIntervals;
-
-                safeScheduleMs(new Callable<Integer>() {
-			int pingIter = 0;
-
-			public Integer call() {
-			    int points = 0;
-			    if (hasJoined) {
-				points += pingAll(pingIter);
-				pingIter = (pingIter + 1) % numProbeIntervals;
-			    }
-			    return 1;
-			}
-                }, 5, 1234, probeSubPeriod);
-
                 safeSchedule(safeRun(new Runnable() {
                     public void run() {
                         if (hasJoined) {
@@ -587,24 +569,6 @@ public class NeuRonNode extends Thread {
                         }
                     }
                 }), 7, neighborBroadcastPeriod);
-
-                if (enableSubpings) {
-		    int subpingSubPeriod = (1000 * subpingPeriod) / numProbeIntervals;
-
-                    safeScheduleMs(new Callable<Integer>() {
-
-			    int pingIter = 0;
-
-			    public Integer call() {
-				if(hasJoined) {
-				    subping(pingIter);
-				    pingIter = (pingIter + 1) % numProbeIntervals;
-				}
-				return 1;
-			    }
-			}, 5, 5521, subpingSubPeriod);
-                    // TODO should these initial offsets be constants?
-                }
 
                 scheduler.scheduleWithFixedDelay(safeRun(new Runnable() {
                     public void run() {
@@ -679,33 +643,35 @@ public class NeuRonNode extends Thread {
         return p;
     }
 
-    private int subping(int pingIter) {
-        // We will only subping a fraction of the nodes at this iteration
-        // Note: this synch. statement is redundant until we remove global lock
-        List<Short> nids = new ArrayList<Short>();
-        int bytes = 0, initCount = subprobeCount;
-        for (Object obj : pingTable[pingIter]) {
-            NodeState dst = (NodeState) obj;
-            // TODO: dst.hop almost always != 0 (except when dst is new node)
-            if (dst.info.id != myNid && dst.hop != 0) {
-                NodeState hop = nodes.get(dst.hop);
-                long time = System.currentTimeMillis();
-                InetSocketAddress nod = new InetSocketAddress(dst.info.addr,
-                        dst.info.port);
-                InetSocketAddress hopAddr = new InetSocketAddress(
-                        hop.info.addr, hop.info.port);
-                bytes += sendObj(subprobe(nod, time, SUBPING), hopAddr);
-                nids.add(dst.info.id);
-                subprobeCount++;
-            }
-        }
+//    private int subping(int pingIter) {
+//        // We will only subping a fraction of the nodes at this iteration
+//        // Note: this synch. statement is redundant until we remove global lock
+//        List<Short> nids = new ArrayList<Short>();
+//        int initCount = subprobeCount;
+//        for (Object obj : pingTable[pingIter]) {
+//            NodeState dst = (NodeState) obj;
+//            // TODO: dst.hop almost always != 0 (except when dst is new node)
+//            subpingPeer(dst);
+//        }
+//
+//        if (subprobeBytes > initBytes) {
+//            log("sent subpings " + bytes + " bytes, to " + nids);
+//        }
+//
+//        return subprobeCount - initCount;
+//    }
 
-        if (bytes > 0) {
-            log("sent subpings " + bytes + " bytes, to " + nids);
-            subprobeBytes += bytes;
+    private void subpingPeer(NodeState dst) {
+        if (dst.info.id != myNid && dst.hop != 0) {
+            NodeState hop = nodes.get(dst.hop);
+            long time = System.currentTimeMillis();
+            InetSocketAddress nod = new InetSocketAddress(dst.info.addr,
+                    dst.info.port);
+            InetSocketAddress hopAddr = new InetSocketAddress(
+                    hop.info.addr, hop.info.port);
+            subprobeBytes += sendObj(subprobe(nod, time, SUBPING), hopAddr);
+            subprobeCount++;
         }
-
-        return subprobeCount - initCount;
     }
 
     private final Serialization probeSer = new Serialization();
@@ -758,56 +724,77 @@ public class NeuRonNode extends Thread {
         log("subpong from " + addr2nid(p.nod) + " via " + addr2nid(p.src) + ": " + latency + ", time " + p.time);
     }
 
-    private int pingAll(int pingIter) {
+    private final int fastProbePeriodMs = 3000;
+
+    private int pingAll() {
+        if (pingQ.isEmpty()) return 0;
+
         log("pinging");
 
         // We will only ping a fraction of the nodes at this iteration
         // Note: this synch. statement is redundant until we remove global lock
 
         int initCount = pingpongCount;
+        int maxCount = pingpongCount + 5;
         PeerPing ping = new PeerPing();
         ping.time = System.currentTimeMillis();
         ping.src = myAddr;
-        for (Object node : pingTable[pingIter]) {
-            NodeInfo info = ((NodeState) node).info;
-            if (info.id != myNid) {
-                pingpongCount++;
-                pingpongBytes += sendObj(ping, new InetSocketAddress(info.addr,
-                        info.port));
+        while (System.currentTimeMillis() >= pingQ.peek().first && pingpongCount < maxCount) {
+            Pair<Long, NodeState> pair = pingQ.remove();
+            long scheduledTime = pair.first;
+            NodeState state = pair.second;
+            NodeInfo info = state.info;
+
+            /*
+             * send ping to the membership server (co-ord) - this might not be
+             * required if everone makes their own local decision. i.e. each node
+             * notices that no other node can reach a node (say X), then each node
+             * sends the co-ord a msg saying that "i think X is dead". The sending
+             * of this msg can be staggered in time so that the co-ord is not
+             * flooded with mesgs. The co-ordinator can then make a decision on
+             * keeping or removing node Y from the membership. On seeing a
+             * subsequent msg from the co-ord that X has been removed from the
+             * overlay, if a node Y has not sent its "i think X is dead" msg, it can
+             * cancel this event.
+             */
+
+            if (info.id == 0) {
+                pingCoord();
+                pingQ.add(Pair.of(scheduledTime + probePeriod, state));
+            } else {
+                pingPeer(info);
+                pingQ.add(Pair.of(scheduledTime + fastProbePeriodMs, state));
             }
         }
 
-        /*
-         * send ping to the membership server (co-ord) - this might not be
-         * required if everone makes their own local decision. i.e. each node
-         * notices that no other node can reach a node (say X), then each node
-         * sends the co-ord a msg saying that "i think X is dead". The sending
-         * of this msg can be staggered in time so that the co-ord is not
-         * flooded with mesgs. The co-ordinator can then make a decision on
-         * keeping or removing node Y from the membership. On seeing a
-         * subsequent msg from the co-ord that X has been removed from the
-         * overlay, if a node Y has not sent its "i think X is dead" msg, it can
-         * cancel this event.
-         */
-
-        // Only ping the coordinator once per ping interval (not per
-        // subinterval)
-        if (pingIter == 0) {
-            Ping p = new Ping();
-            p.time = System.currentTimeMillis();
-            NodeInfo tmp = nodes.get(myNid).info;
-            p.info = new NodeInfo();
-            p.info.id = origNid; // note that the ping info uses the
-            // original id
-            p.info.addr = tmp.addr;
-            p.info.port = tmp.port;
-
-            pingpongCount++;
-            pingpongBytes += sendObject(p, (short) 0);
-        }
-        // log("sent pings, " + totalSize + " bytes");
-
         return pingpongCount - initCount;
+    }
+
+    private void subpingPeer(NodeInfo info) {
+    }
+
+    private long pingPeer(NodeInfo info) {
+        PeerPing ping = new PeerPing();
+        ping.time = System.currentTimeMillis();
+        ping.src = myAddr;
+        pingpongBytes += sendObj(ping, new InetSocketAddress(info.addr,
+                info.port));
+        pingpongCount++;
+        return ping.time;
+    }
+
+    private void pingCoord() {
+        Ping p = new Ping();
+        p.time = System.currentTimeMillis();
+        NodeInfo tmp = nodes.get(myNid).info;
+        p.info = new NodeInfo();
+        p.info.id = origNid; // note that the ping info uses the
+        // original id
+        p.info.addr = tmp.addr;
+        p.info.port = tmp.port;
+
+        pingpongBytes += sendObject(p, (short) 0);
+        pingpongCount++;
     }
 
     private Object deserialize(ByteBuffer buf) {
@@ -1028,7 +1015,7 @@ public class NeuRonNode extends Thread {
                         short latency = (short) (rawRtt / 2);
                         short nid = state.info.id;
                         if (state != null) {
-                            resetTimeoutAtNode(nid);
+                            resetTimeoutAtNode(nid, pong.time);
                             NodeState self = nodes.get(myNid);
                             short oldLatency = self.latencies.get(nid);
                             final short ewma;
@@ -1179,7 +1166,7 @@ public class NeuRonNode extends Thread {
         rendezvousClientTimeouts.put(nid, future);
     }
 
-    private void resetTimeoutAtNode(final short nid) {
+    private void resetTimeoutAtNode(final short nid, long timestamp) {
         if (nodes.containsKey(nid)) {
             ScheduledFuture<?> oldFuture = timeouts.get(nid);
             if (oldFuture != null) {
@@ -1195,6 +1182,10 @@ public class NeuRonNode extends Thread {
                 }
             }
             node.isReachable = true;
+            ProbeTask task = probeFutures.get(nid);
+            if (task != null && timestamp == task.timestamp) {
+                task.schedule(probePeriod * 1000, true);
+            }
 	    node.isDead = false;
 
             ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
@@ -1288,6 +1279,61 @@ public class NeuRonNode extends Thread {
         broadcastMembershipChange(nid);
     }
 
+    private final class ProbeTask implements Runnable {
+        public long timestamp;
+        /**
+         * When we were scheduled to run in the previous round.
+         */
+        public long lastScheduledTime;
+        public long nextScheduledTime;
+        public ScheduledFuture<?> future;
+        public final NodeInfo node;
+        public int consecutiveFastProbes = 0;
+
+        public ProbeTask(NodeInfo n) {
+            node = n;
+        }
+
+        /**
+         * This will set the scheduled wake-up time to be lastScheduledTime +
+         * delay. So, you may call this multiple times to schedule regular times
+         * (until time reaches nextScheduledTime). And jitter is counted only in
+         * the actual schedule, but does not influencing the rhythm. A bit
+         * confusing.
+         *
+         * @param delay
+         *                milliseconds
+         */
+        public void schedule(long delay, boolean doJitter) {
+            if (future == null)
+                lastScheduledTime = System.currentTimeMillis();
+            nextScheduledTime = lastScheduledTime + delay;
+
+            System.out.println("bumping by " + delay);
+            if (future != null)
+                future.cancel(true);
+            int jitter = doJitter ? rand.nextInt(2000) - 1000 : 0;
+            future = scheduler.schedule(this, jitter + nextScheduledTime
+                    - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+        }
+
+        public void run() {
+            System.out.println(myNid + " pinging " + node.id);
+            timestamp = pingPeer(node);
+            consecutiveFastProbes++;
+            System.out.println("#fastProbes = " + consecutiveFastProbes);
+
+            // on the fifth probe, slow back down
+            int nextDelay = consecutiveFastProbes >= 5 ? probePeriod * 1000
+                    : fastProbePeriodMs;
+            lastScheduledTime = nextScheduledTime;
+            schedule(nextDelay, true);
+        }
+    }
+
+    private final Hashtable<Short, ProbeTask> probeFutures = new Hashtable<Short, ProbeTask>();
+    private final Hashtable<Short, ScheduledFuture<?>> subprobeFutures = new Hashtable<Short, ScheduledFuture<?>>();
+
     /**
      * updates our member state. modifies data structures as necessary to
      * maintain invariants.
@@ -1300,23 +1346,39 @@ public class NeuRonNode extends Thread {
 	for (NodeInfo node : newNodes)
 	    newNids.add(node.id);
 
-
 	    // add new nodes
 
-	    for (NodeInfo node : newNodes)
+	    for (final NodeInfo node : newNodes)
 		if (!nodes.containsKey(node.id)) {
 
-		    NodeState newNode = new NodeState(node);
+		    final NodeState newNode = new NodeState(node);
+
+                    if (node.id != myNid) {
+                        // probes
+                        ProbeTask task = new ProbeTask(node);
+                        probeFutures.put(node.id, task);
+                        task.schedule(rand.nextInt(30000), false);
+
+                        // subprobes
+                        scheduler.schedule(new Runnable() {
+                            public void run() {
+                                subpingPeer(newNode);
+                                int jitter = rand.nextInt(2000) - 1000;
+                                subprobeFutures.put(node.id, scheduler.schedule(this, subpingPeriod * 1000
+                                        + jitter, TimeUnit.MILLISECONDS));
+                            }
+                        }, rand.nextInt(30000), TimeUnit.MILLISECONDS);
+                    }
 
 		    // Choose a subinterval for this node during which we will ping it
-		    int loc = rand.nextInt(numProbeIntervals);
-		    pingTable[loc].add(newNode);
-		    pingId.put(newNode, loc);
+//		    int loc = rand.nextInt(numProbeIntervals);
+//		    pingTable[loc].add(newNode);
+//		    pingId.put(newNode, loc);
 
 		    nodes.put(node.id, newNode);
                     addr2node.put(new InetSocketAddress(node.addr, node.port), newNode);
 		    if (node.id != myNid)
-			resetTimeoutAtNode(node.id);
+			resetTimeoutAtNode(node.id, -1);
 		}
 
 	    // Remove nodes. We need toRemove to avoid
@@ -1334,8 +1396,10 @@ public class NeuRonNode extends Thread {
             NodeState node = pair.second;
             // Remove the node from the subinterval during which it
             // was pinged.
-            int index = pingId.remove(node);
-            pingTable[index].remove(node);
+//            int index = pingId.remove(node);
+//            pingTable[index].remove(node);
+            probeFutures.remove(nid).future.cancel(false);
+            subprobeFutures.remove(nid).cancel(false);
             addr2node.remove(new InetSocketAddress(node.info.addr, node.info.port));
             NodeState n = nodes.remove(nid);
             assert n != null;
@@ -1386,6 +1450,7 @@ public class NeuRonNode extends Thread {
 	// numRows needs to be >= numCols
         numRows = (short) Math.ceil(Math.sqrt(nodes.size()));
         numCols = (short) Math.ceil((double) nodes.size() / (double) numRows);
+
         grid = new NodeState[numRows][numCols];
 
 	// These are used temporarily for setting up the defaults
@@ -1551,7 +1616,6 @@ public class NeuRonNode extends Thread {
             rendezvousServers.put(entry.getKey(), new HashSet<NodeState>());
         }
         lastRendezvousServers.clear();
-
 
         log("state " + currentStateVersion + ", mbrs " + nids);
     }

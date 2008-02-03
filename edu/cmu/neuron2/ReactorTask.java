@@ -29,6 +29,7 @@ public class ReactorTask implements ScheduledFuture<Void> {
     public void run() {
         if (state != TaskState.CANCELLED) {
             assert state == TaskState.WAITING;
+            state = TaskState.RUNNING;
             try {
                 r.run();
             } catch (Exception ex) {
