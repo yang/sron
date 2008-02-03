@@ -89,11 +89,6 @@ public class NeuRonNode extends Thread {
      */
 
     /**
-     * when to ping who
-     */
-    private final PriorityQueue<Pair<Long, NodeState>> pingQ = new PriorityQueue<Pair<Long,NodeState>>();
-
-    /**
      * maps nid to {the set of rendezvous servers to that nid}
      */
     private final Hashtable<Short, HashSet<NodeState>> rendezvousServers = new Hashtable<Short, HashSet<NodeState>>();
@@ -726,52 +721,6 @@ public class NeuRonNode extends Thread {
 
     private final int fastProbePeriodMs = 3000;
 
-    private int pingAll() {
-        if (pingQ.isEmpty()) return 0;
-
-        log("pinging");
-
-        // We will only ping a fraction of the nodes at this iteration
-        // Note: this synch. statement is redundant until we remove global lock
-
-        int initCount = pingpongCount;
-        int maxCount = pingpongCount + 5;
-        PeerPing ping = new PeerPing();
-        ping.time = System.currentTimeMillis();
-        ping.src = myAddr;
-        while (System.currentTimeMillis() >= pingQ.peek().first && pingpongCount < maxCount) {
-            Pair<Long, NodeState> pair = pingQ.remove();
-            long scheduledTime = pair.first;
-            NodeState state = pair.second;
-            NodeInfo info = state.info;
-
-            /*
-             * send ping to the membership server (co-ord) - this might not be
-             * required if everone makes their own local decision. i.e. each node
-             * notices that no other node can reach a node (say X), then each node
-             * sends the co-ord a msg saying that "i think X is dead". The sending
-             * of this msg can be staggered in time so that the co-ord is not
-             * flooded with mesgs. The co-ordinator can then make a decision on
-             * keeping or removing node Y from the membership. On seeing a
-             * subsequent msg from the co-ord that X has been removed from the
-             * overlay, if a node Y has not sent its "i think X is dead" msg, it can
-             * cancel this event.
-             */
-
-            if (info.id == 0) {
-                pingCoord();
-                pingQ.add(Pair.of(scheduledTime + probePeriod, state));
-            } else {
-                pingPeer(info);
-                pingQ.add(Pair.of(scheduledTime + fastProbePeriodMs, state));
-            }
-        }
-
-        return pingpongCount - initCount;
-    }
-
-    private void subpingPeer(NodeInfo info) {
-    }
 
     private long pingPeer(NodeInfo info) {
         PeerPing ping = new PeerPing();
@@ -1168,10 +1117,6 @@ public class NeuRonNode extends Thread {
 
     private void resetTimeoutAtNode(final short nid, long timestamp) {
         if (nodes.containsKey(nid)) {
-            ScheduledFuture<?> oldFuture = timeouts.get(nid);
-            if (oldFuture != null) {
-                oldFuture.cancel(false);
-            }
             final NodeState node = nodes.get(nid);
             if (!node.isReachable) {
                 log(nid + " reachable");
@@ -1184,24 +1129,12 @@ public class NeuRonNode extends Thread {
             node.isReachable = true;
             ProbeTask task = probeFutures.get(nid);
             if (task != null && timestamp == task.timestamp) {
+		// We finally got a pong for the node, so reset the number of
+		// consecutive probes.
+		task.consecutiveUnansweredProbes = 0;
                 task.schedule(probePeriod * 1000, true);
             }
 	    node.isDead = false;
-
-            ScheduledFuture<?> future = scheduler.schedule(safeRun(new Runnable() {
-                public void run() {
-                    if (nodes.containsKey(nid)) {
-                        log(nid + " unreachable");
-                        node.isReachable = false;
-                        nodes.get(myNid).latencies.remove(nid);
-			// TODO: do we really want this?
-                        rendezvousClients.remove(node);
-
-                        findPaths(node, false);
-                    }
-                }
-            }), linkTimeout, TimeUnit.SECONDS);
-            timeouts.put(nid, future);
         }
     }
 
@@ -1288,7 +1221,7 @@ public class NeuRonNode extends Thread {
         public long nextScheduledTime;
         public ScheduledFuture<?> future;
         public final NodeInfo node;
-        public int consecutiveFastProbes = 0;
+        public int consecutiveUnansweredProbes = 0;
 
         public ProbeTask(NodeInfo n) {
             node = n;
@@ -1318,13 +1251,52 @@ public class NeuRonNode extends Thread {
         }
 
         public void run() {
-            System.out.println(myNid + " pinging " + node.id);
-            timestamp = pingPeer(node);
-            consecutiveFastProbes++;
-            System.out.println("#fastProbes = " + consecutiveFastProbes);
 
-            // on the fifth probe, slow back down
-            int nextDelay = consecutiveFastProbes >= 5 ? probePeriod * 1000
+	    // If we don't receive a pong after 5 consecutive fast probes
+	    // we conclude that the node is unreachable.
+	    if(consecutiveUnansweredProbes == 5) {
+
+		log(myNid + " unreachable");
+		node.isReachable = false;
+		nodes.get(myNid).latencies.remove(nid);
+
+		// TODO: This logic needs to be changed, as it should
+		//       not be coupled with our measurement data. For
+		//       example, it is important that we quickly
+		//       report reachability failures in our measurements,
+		//       so that other nodes can judge node failures.
+		//       However, it doesn't necessarily hurt to continue sending
+		//       recommendations *for* (but not to) nodes from whom
+		//       we can't receive measurement packets (up to some amount
+		//       of time, of course!). Imagine scenarios where the
+		//       client has a very high loss rate to its rendezvous
+		//       servers. We rather compute optimal one-hops for it
+		//       using slightly stale data (but new data from other
+		//       nodes) than not at all. However, it is important in
+		//       this setting that we associate a timestamp with each
+		//       recommendation which says how old the measurements are
+		//       that were used to compute the recommendation.
+		rendezvousClients.remove(node);
+
+		findPaths(node, false);
+	    }
+	    else {
+
+		System.out.println(myNid + " pinging " + node.id);
+		timestamp = pingPeer(node);
+
+		consecutiveUnansweredProbes++;
+		System.out.println("#consecutiveUnansweredProbes = " + consecutiveUnansweredProbes);
+	    }
+
+
+            // On the fifth probe, slow back down. We don't reset the consecutiveUnansweredProbes
+	    // counter until we successfully receive a pong. Thus, after the initial burst
+	    // of 5 probes, we will consider a node dead and will only bother pinging it 
+	    // once every 30 seconds until it comes up again (by successfully responding to
+	    // one of these pings). If we think failures are short lived, but the loss rate
+	    // is high, we might want to consider a different design choice.
+            int nextDelay = consecutiveUnansweredProbes >= 5 ? probePeriod * 1000
                     : fastProbePeriodMs;
             lastScheduledTime = nextScheduledTime;
             schedule(nextDelay, true);
