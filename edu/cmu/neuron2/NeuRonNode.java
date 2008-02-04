@@ -1220,10 +1220,10 @@ public class NeuRonNode extends Thread {
         public long lastScheduledTime;
         public long nextScheduledTime;
         public ScheduledFuture<?> future;
-        public final NodeInfo node;
+        public final NodeState node;
         public int consecutiveUnansweredProbes = 0;
 
-        public ProbeTask(NodeInfo n) {
+        public ProbeTask(NodeState n) {
             node = n;
         }
 
@@ -1258,7 +1258,7 @@ public class NeuRonNode extends Thread {
 
 		log(myNid + " unreachable");
 		node.isReachable = false;
-		nodes.get(myNid).latencies.remove(nid);
+		nodes.get(myNid).latencies.remove(node.info.id);
 
 		// TODO: This logic needs to be changed, as it should
 		//       not be coupled with our measurement data. For
@@ -1282,8 +1282,8 @@ public class NeuRonNode extends Thread {
 	    }
 	    else {
 
-		System.out.println(myNid + " pinging " + node.id);
-		timestamp = pingPeer(node);
+		System.out.println(myNid + " pinging " + node.info.id);
+		timestamp = pingPeer(node.info);
 
 		consecutiveUnansweredProbes++;
 		System.out.println("#consecutiveUnansweredProbes = " + consecutiveUnansweredProbes);
@@ -1292,7 +1292,7 @@ public class NeuRonNode extends Thread {
 
             // On the fifth probe, slow back down. We don't reset the consecutiveUnansweredProbes
 	    // counter until we successfully receive a pong. Thus, after the initial burst
-	    // of 5 probes, we will consider a node dead and will only bother pinging it 
+	    // of 5 probes, we will consider a node dead and will only bother pinging it
 	    // once every 30 seconds until it comes up again (by successfully responding to
 	    // one of these pings). If we think failures are short lived, but the loss rate
 	    // is high, we might want to consider a different design choice.
@@ -1327,7 +1327,7 @@ public class NeuRonNode extends Thread {
 
                     if (node.id != myNid) {
                         // probes
-                        ProbeTask task = new ProbeTask(node);
+                        ProbeTask task = new ProbeTask(newNode);
                         probeFutures.put(node.id, task);
                         task.schedule(rand.nextInt(30000), false);
 
