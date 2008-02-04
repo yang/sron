@@ -402,7 +402,7 @@ public class NeuRonNode extends Thread {
         public short oid, dst, lat;
         public SimEvent(int secs, short src, short dst, short lat) {
             this.secs = secs;
-            this.oid = oid;
+            this.oid = src; // TODO check this, originally a bug: this.oid = oid;
             this.dst = dst;
             this.lat = lat;
         }
@@ -454,32 +454,6 @@ public class NeuRonNode extends Thread {
             }
         }, initialDelay, TimeUnit.SECONDS);
     }
-    private ScheduledFuture<?> safeScheduleMs(final Callable<Integer> r, final int maxPoints, long initialDelay, final long period) {
-        return scheduler.schedule(new Runnable() {
-            private long scheduledTime = -1;
-            public void run() {
-                if (scheduledTime < 0) scheduledTime = System.currentTimeMillis();
-                int points = 0;
-                while (true) {
-                    try {
-                        points += r.call();
-                    } catch (Exception ex) {
-                        err(ex);
-                    }
-                    long now = System.currentTimeMillis();
-                    scheduledTime = Math.max(scheduledTime + period, now);
-                    if (scheduledTime > now) {
-                        scheduler.schedule(this, scheduledTime - now, TimeUnit.MILLISECONDS);
-                        break;
-                    }
-                    if (points > maxPoints) {
-                        scheduler.schedule(this, now + period, TimeUnit.MILLISECONDS);
-                        break;
-                    }
-                }
-            }
-        }, initialDelay, TimeUnit.MILLISECONDS);
-    }
 
     private boolean hasJoined = false;
     private Session session = null;
@@ -516,6 +490,26 @@ public class NeuRonNode extends Thread {
                 }
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
+
+                // ping the coordinator
+                scheduler.scheduleWithFixedDelay(safeRun(new Runnable() {
+                    public void run() {
+                        if (hasJoined) {
+                            Ping p = new Ping();
+                            p.time = System.currentTimeMillis();
+                            NodeInfo tmp = nodes.get(myNid).info;
+                            p.info = new NodeInfo();
+                            // note that the ping info uses the original id
+                            p.info.id = origNid;
+                            p.info.addr = tmp.addr;
+                            p.info.port = tmp.port;
+
+                            pingpongCount++;
+                            pingpongBytes += sendObject(p, (short) 0);
+                        }
+                    }
+                }), 7, probePeriod, TimeUnit.SECONDS);
+
 
                 safeSchedule(safeRun(new Runnable() {
                     public void run() {
