@@ -491,21 +491,11 @@ public class NeuRonNode extends Thread {
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
-                // ping the coordinator
+                // Ping the coordinator (special case)
                 scheduler.scheduleWithFixedDelay(safeRun(new Runnable() {
                     public void run() {
                         if (hasJoined) {
-                            Ping p = new Ping();
-                            p.time = System.currentTimeMillis();
-                            NodeInfo tmp = nodes.get(myNid).info;
-                            p.info = new NodeInfo();
-                            // note that the ping info uses the original id
-                            p.info.id = origNid;
-                            p.info.addr = tmp.addr;
-                            p.info.port = tmp.port;
-
-                            pingpongCount++;
-                            pingpongBytes += sendObject(p, (short) 0);
+			    pingCoord();
                         }
                     }
                 }), 7, probePeriod, TimeUnit.SECONDS);
@@ -731,8 +721,7 @@ public class NeuRonNode extends Thread {
         p.time = System.currentTimeMillis();
         NodeInfo tmp = nodes.get(myNid).info;
         p.info = new NodeInfo();
-        p.info.id = origNid; // note that the ping info uses the
-        // original id
+        p.info.id = origNid; // note that the ping info uses the original id
         p.info.addr = tmp.addr;
         p.info.port = tmp.port;
 
