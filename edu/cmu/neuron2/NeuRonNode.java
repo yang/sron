@@ -704,6 +704,7 @@ public class NeuRonNode extends Thread {
     }
 
     private final int fastProbePeriodMs = 3000;
+    private final int fastProbeTries = 4;
 
 
     private long pingPeer(NodeInfo info) {
@@ -901,11 +902,11 @@ public class NeuRonNode extends Thread {
 
         @Override
         public void handle(Session session, InetSocketAddress src, ByteBuffer buf) {
+	    long receiveTime = System.currentTimeMillis();
             try {
                 // TODO check SimpleMsg.session
                 Object obj = deserialize(buf);
                 if (obj == null) return;
-                long receiveTime;
                 if (obj instanceof Subprobe) {
                     Subprobe p = (Subprobe) obj;
                     subprobeBytes += buf.limit();
@@ -915,8 +916,6 @@ public class NeuRonNode extends Thread {
                         case SUBPING_FWD: handleSubpingFwd(p); break;
                         case SUBPONG: handleSubpong(p); break;
                         case SUBPONG_FWD:
-                        // TODO move into the new worker thread when it's here
-                        receiveTime = System.currentTimeMillis();
                         handleSubpongFwd(p, receiveTime);
                         break;
                         default: assert false;
@@ -1004,10 +1003,10 @@ public class NeuRonNode extends Thread {
                             updateMembers(m.members);
                         } else if (msg instanceof Measurements) {
                             resetTimeoutOnRendezvousClient(msg.src);
-                            updateMeasurements((Measurements) msg);
+                            updateMeasurements((Measurements) msg, receiveTime);
                         } else if (msg instanceof RoutingRecs) {
                             RoutingRecs recs = (RoutingRecs) msg;
-                            handleRecommendations(recs);
+                            handleRecommendations(recs, receiveTime);
                             log("got recs " + routesToString(recs.recs));
                         } else if (msg instanceof Ping ||
                                    msg instanceof Pong ||
@@ -1237,7 +1236,7 @@ public class NeuRonNode extends Thread {
 
 	    // If we don't receive a pong after 5 consecutive fast probes
 	    // we conclude that the node is unreachable.
-	    if(consecutiveUnansweredProbes == 5) {
+	    if(consecutiveUnansweredProbes == fastProbeTries + 1) {
 
 		log(myNid + " unreachable");
 		node.isReachable = false;
@@ -1279,7 +1278,7 @@ public class NeuRonNode extends Thread {
 	    // once every 30 seconds until it comes up again (by successfully responding to
 	    // one of these pings). If we think failures are short lived, but the loss rate
 	    // is high, we might want to consider a different design choice.
-            int nextDelay = consecutiveUnansweredProbes >= 5 ? probePeriod * 1000
+            int nextDelay = consecutiveUnansweredProbes >= fastProbeTries+1 ? probePeriod * 1000
                     : fastProbePeriodMs;
             lastScheduledTime = nextScheduledTime;
             schedule(nextDelay, true);
@@ -1581,7 +1580,6 @@ public class NeuRonNode extends Thread {
      * @return
      */
     private boolean isFailedRendezvous(NodeState n, NodeState remote) {
-	// TODO: isReachable semantics should be fixed (but how?)
 	// NOTE: We may never receive this node's measurements since
 	//       it is our rendezvous client, but we don't offer to be
 	//       its rendezvous server. This is why we check for
@@ -1632,7 +1630,7 @@ public class NeuRonNode extends Thread {
      *       note that this may leave rs empty for the coming round
      *       this is what we want bc it will delay failover-finding till the next round
      *
-     * NEW ALGO
+     * OLD ALGO'
      *
      * // CHANGES START
      * build a hashtable for all rendezvous nodes currently used
@@ -1655,6 +1653,10 @@ public class NeuRonNode extends Thread {
      *       rs -= any failed rs
      *       note that this may leave rs empty for the coming round
      *       this is what we want bc it will delay failover-finding till the next round
+     *
+     * NEW ALGO
+     *
+     * // Not yet documented.
      *
      * @return the union of all the sets of non-failed rendezvous servers.
      */
@@ -1739,8 +1741,11 @@ public class NeuRonNode extends Thread {
 
 		// if { any node in rs has n.remoteFailures.contains(remote) == true, then we know that we
 		//   did receive a routing recommendation from it since the last round, and it is alive.
-		//   Remove it from rs and do nothing else this step, as the destination is likely dead.
-		//   set skipIteration=true. }
+		//   Remove it from rs.
+		//   If we do not have evidence (from link states sent to us from the rendezvous clients)
+		//   showing that a node failure did *not* occur, do nothing else in this step, as the
+		//   destination might be dead. set skipIteration=true.
+		// }
 		// else {
 		//   If !n.isReachable for any node n in rs, remove it from rs. We don't expect it to be
 		//     helpful for routing ever.
@@ -1762,6 +1767,7 @@ public class NeuRonNode extends Thread {
 		 */
 
 		boolean skipIteration = false;
+		long dstLastKnownTimeAlive = lastKnownTimeAlive(dst.info.id);
 
 		// We use the iterator so that we can safely remove from the set
 		for (Iterator<NodeState> i = rs.iterator(); i.hasNext();) {
@@ -1769,7 +1775,11 @@ public class NeuRonNode extends Thread {
 
 		    if(r.remoteFailures.contains(dst)) {
 			i.remove();
-			skipIteration = true;
+
+			// Check to see if the lack of a recommendation should hint at
+			// a possible node failure.
+			if(r.recsLastReceived >= dstLastKnownTimeAlive)
+			    skipIteration = true;
 		    }
 		    else if(!r.isReachable) {
 			i.remove();
@@ -1777,7 +1787,7 @@ public class NeuRonNode extends Thread {
 		}
 
 
-		if (!skipIteration && rs.isEmpty() && scheme != RoutingScheme.SQRT_NOFAILOVER) {
+		if (rs.isEmpty() && !skipIteration && scheme != RoutingScheme.SQRT_NOFAILOVER) {
 		    // create debug string
 		    String s = "defaults";
 		    for (NodeState r : defaults) {
@@ -1868,6 +1878,49 @@ public class NeuRonNode extends Thread {
         Collections.sort(list);
         return list;
     }
+
+
+    /**
+     * Returns the most recent time for which we can guarantee that a
+     * particular destination is alive.
+     */
+    private long lastKnownTimeAlive(short nid) {
+
+	long lastKnownTime = 0;
+	NodeState self = nodes.get(myNid);
+
+	// Iterate over all the rendezvous clients
+	for (final NodeState clientNode : rendezvousClients) {
+	    
+	    // If this client reported a latency for the destination
+            if(clientNode.latencies.get(nid) != resetLatency) {
+
+		// What is our latency to this client? This gives us
+		// an estimate of how long the measurement packet took to
+		// get to us. Be conservative and multiply this by
+		// 10 (arbitrary).
+		long lastTimeThisClient = clientNode.latenciesLastReceived 
+		    - self.latencies.get(clientNode.info.id)*10;
+
+		// Record *most recent* such client
+		if(lastTimeThisClient > lastKnownTime)
+		    lastKnownTime = lastTimeThisClient;
+	    }
+	}
+
+	// Now that we have fast probing, this latency information
+	// should be accurate as of this node's last probing period.
+	// Subtract this.
+
+	if(lastKnownTime > 0) {
+
+	    lastKnownTime = lastKnownTime -
+		Math.max(probePeriod, fastProbeTries*(fastProbePeriodMs/1000));
+	}
+
+	return lastKnownTime;
+    }
+
 
     public static enum RoutingScheme { SIMPLE, SQRT, SQRT_NOFAILOVER, SQRT_RC_FAILOVER, SQRT_SPECIAL };
     private final RoutingScheme scheme;
@@ -2109,18 +2162,21 @@ public class NeuRonNode extends Thread {
         log("sent measurements, " + totalSize + " bytes, to " + servers);
     }
 
-    private void updateMeasurements(Measurements m) {
+    private void updateMeasurements(Measurements m, long receiveTime) {
         NodeState src = nodes.get(m.src);
+	src.latenciesLastReceived = receiveTime;
         for (int i = 0; i < m.probeTable.length; i++)
             src.latencies.put(memberNids.get(i), m.probeTable[i]);
         // TODO we aren't setting node.{hop,cameUp,isHopRecommended=false}...
     }
 
-    private void handleRecommendations(RoutingRecs msg) {
+    private void handleRecommendations(RoutingRecs msg, long receiveTime) {
         ArrayList<Rec> recs = msg.recs;
         NodeState r = nodes.get(msg.src);
         r.dstsPresent.clear();
         r.remoteFailures.clear();
+	r.recsLastReceived = receiveTime;
+
         for (Rec rec : recs) {
             r.dstsPresent.add(rec.dst);
             if (nodes.get(rec.via).isReachable) {
@@ -2143,6 +2199,13 @@ public class NeuRonNode extends Thread {
                         node.cameUp = true;
 			node.isDead = false;
 		    }
+
+		    /*
+		     * TODO: We should have a timestamp on the recommendations,
+		     *       and replace the hop iff it is using the latest latency
+		     *       information for the source (us) and destination.
+		     */
+
                     node.isHopRecommended = true;
                     node.hop = rec.via;
                 }
@@ -2348,6 +2411,15 @@ public class NeuRonNode extends Thread {
          */
         public final ShortShortMap latencies = new ShortShortMap(resetLatency);
 
+	/**
+	 * The time that the last measurements packet was received from this
+	 * node. This is populated/valid for rendezvous clients, and will be
+	 * used to determine bounds on the last time that a destination was
+	 * known to be alive.
+	 */
+	public long latenciesLastReceived = 0;
+	
+
         /**
          * the recommended intermediate hop for us to get to this node, or 0 if
          * no way we know of to get to that node, and thus believe the node is
@@ -2404,6 +2476,13 @@ public class NeuRonNode extends Thread {
          * dstsPresent, the complement of remoteFailures (in defaultClients).
          */
         public final HashSet<Short> dstsPresent = new HashSet<Short>();
+
+
+	/**
+	 * The time that the last recommendation packet was received from this
+	 * node. This is populated/valid for rendezvous servers.
+	 */
+	public long recsLastReceived = 0;
 
 
         /**
