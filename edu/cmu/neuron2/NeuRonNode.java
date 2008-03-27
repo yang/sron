@@ -120,7 +120,7 @@ public class NeuRonNode extends Thread {
     private short currentStateVersion;
 
     public final int neighborBroadcastPeriod;
-    public final int probePeriod;
+    public final int probePeriod; // seconds
     public final int gcPeriod;
 
     private final NodeInfo coordNode;
@@ -1236,8 +1236,7 @@ public class NeuRonNode extends Thread {
                 lastScheduledTime = System.currentTimeMillis();
             nextScheduledTime = lastScheduledTime + delay;
 
-	    // TODO: Probably too verbose -- remove or change to println?
-            log("bumping by " + delay);
+            // log("bumping by " + delay);
             if (future != null)
                 future.cancel(true);
             int jitter = doJitter ? rand.nextInt(2000) - 1000 : 0;
@@ -1277,12 +1276,9 @@ public class NeuRonNode extends Thread {
 	    }
 
 	    // TODO: probably too verbose -- comment out?
-	    log(myNid + " pinging " + node.info.id);
+	    log("pinging " + node.info.id + " try #" + consecutiveUnansweredProbes);
 	    timestamp = pingPeer(node.info);
-
 	    consecutiveUnansweredProbes++;
-	    // TODO: probably too verbose -- comment out?
-	    log("#consecutiveUnansweredProbes = " + consecutiveUnansweredProbes);
 
             // On the fifth probe, slow back down. We don't reset the consecutiveUnansweredProbes
 	    // counter until we successfully receive a pong. Thus, after the initial burst
@@ -1323,7 +1319,7 @@ public class NeuRonNode extends Thread {
                         // probes
                         ProbeTask task = new ProbeTask(newNode);
                         probeFutures.put(node.id, task);
-                        task.schedule(rand.nextInt(30000), false);
+                        task.schedule(rand.nextInt(probePeriod*1000), false);
 
                         // subprobes
                         scheduler.schedule(new Runnable() {
@@ -1333,7 +1329,7 @@ public class NeuRonNode extends Thread {
                                 subprobeFutures.put(node.id, scheduler.schedule(this, subpingPeriod * 1000
                                         + jitter, TimeUnit.MILLISECONDS));
                             }
-                        }, rand.nextInt(30000), TimeUnit.MILLISECONDS);
+                        }, rand.nextInt(subpingPeriod), TimeUnit.MILLISECONDS);
                     }
 
 		    // Choose a subinterval for this node during which we will ping it
