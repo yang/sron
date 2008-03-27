@@ -923,6 +923,14 @@ public class NeuRonNode extends Thread {
                     return; // TODO early exit is unclean
                 } else if (obj instanceof PeerPing) {
                     PeerPing ping = ((PeerPing) obj);
+
+		    // TEST CODE
+		    /*
+			// Stochastically decide to drop pings.
+			if(rand.nextBoolean())
+			    return;
+		    */
+
                     PeerPong pong = new PeerPong();
                     pong.time = ping.time;
                     pong.src = myAddr;
@@ -1075,8 +1083,12 @@ public class NeuRonNode extends Thread {
 
     private void resetTimeoutOnRendezvousClient(final short nid) {
         final NodeState node = nodes.get(nid);
+
+	// Commenting out below lines because if a link state arrives before
+	// a pong for this node, then we would have otherwise tossed it out.
+	// TODO: what should we put here instead?
 	// TODO: wrong semantics for isReachable
-        if (!node.isReachable) return;
+	//       if (!node.isReachable) return;
 
         ScheduledFuture<?> oldFuture = rendezvousClientTimeouts.get(nid);
         if (oldFuture != null) {
@@ -1224,7 +1236,8 @@ public class NeuRonNode extends Thread {
                 lastScheduledTime = System.currentTimeMillis();
             nextScheduledTime = lastScheduledTime + delay;
 
-            System.out.println("bumping by " + delay);
+	    // TODO: Probably too verbose -- remove or change to println?
+            log("bumping by " + delay);
             if (future != null)
                 future.cancel(true);
             int jitter = doJitter ? rand.nextInt(2000) - 1000 : 0;
@@ -1234,11 +1247,11 @@ public class NeuRonNode extends Thread {
 
         public void run() {
 
-	    // If we don't receive a pong after 5 consecutive fast probes
+	    // If we don't receive a pong after 4 consecutive fast probes
 	    // we conclude that the node is unreachable.
-	    if(consecutiveUnansweredProbes == fastProbeTries + 1) {
+	    if(consecutiveUnansweredProbes == fastProbeTries) {
 
-		log(myNid + " unreachable");
+		log(node.info.id + " unreachable");
 		node.isReachable = false;
 		nodes.get(myNid).latencies.remove(node.info.id);
 
@@ -1262,15 +1275,14 @@ public class NeuRonNode extends Thread {
 
 		findPaths(node, false);
 	    }
-	    else {
 
-		System.out.println(myNid + " pinging " + node.info.id);
-		timestamp = pingPeer(node.info);
+	    // TODO: probably too verbose -- comment out?
+	    log(myNid + " pinging " + node.info.id);
+	    timestamp = pingPeer(node.info);
 
-		consecutiveUnansweredProbes++;
-		System.out.println("#consecutiveUnansweredProbes = " + consecutiveUnansweredProbes);
-	    }
-
+	    consecutiveUnansweredProbes++;
+	    // TODO: probably too verbose -- comment out?
+	    log("#consecutiveUnansweredProbes = " + consecutiveUnansweredProbes);
 
             // On the fifth probe, slow back down. We don't reset the consecutiveUnansweredProbes
 	    // counter until we successfully receive a pong. Thus, after the initial burst
