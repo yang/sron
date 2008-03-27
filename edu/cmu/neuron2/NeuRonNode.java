@@ -1276,7 +1276,7 @@ public class NeuRonNode extends Thread {
 	    }
 
 	    // TODO: probably too verbose -- comment out?
-	    log("pinging " + node.info.id + " try #" + consecutiveUnansweredProbes);
+	    log("pinging " + node.info.id + " try " + consecutiveUnansweredProbes+1);
 	    timestamp = pingPeer(node.info);
 	    consecutiveUnansweredProbes++;
 
