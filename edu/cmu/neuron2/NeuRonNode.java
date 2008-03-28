@@ -1123,10 +1123,14 @@ public class NeuRonNode extends Thread {
             node.isReachable = true;
             ProbeTask task = probeFutures.get(nid);
             if (task != null && timestamp == task.timestamp) {
+
 		// We finally got a pong for the node, so reset the number of
 		// consecutive probes.
 		task.consecutiveUnansweredProbes = 0;
-                task.schedule(probePeriod * 1000, true);
+
+		// We got a pong, so reset the ping timer to be _probePeriod_
+		// from when we last sent a ping.
+		task.schedule(probePeriod * 1000, true, true);
             }
 	    node.isDead = false;
         }
@@ -1207,12 +1211,10 @@ public class NeuRonNode extends Thread {
     }
 
     private final class ProbeTask implements Runnable {
+
+	// When was the last probe sent out?
         public long timestamp;
-        /**
-         * When we were scheduled to run in the previous round.
-         */
-        public long lastScheduledTime;
-        public long nextScheduledTime;
+
         public ScheduledFuture<?> future;
         public final NodeState node;
         public int consecutiveUnansweredProbes = 0;
@@ -1222,26 +1224,26 @@ public class NeuRonNode extends Thread {
         }
 
         /**
-         * This will set the scheduled wake-up time to be lastScheduledTime +
-         * delay. So, you may call this multiple times to schedule regular times
-         * (until time reaches nextScheduledTime). And jitter is counted only in
-         * the actual schedule, but does not influencing the rhythm. A bit
-         * confusing.
+	 * Replace any currently scheduled ping task with the current one,
+	 * defined by some delay (and possibly jitter) relative to either
+	 * the time when the last ping was sent or now.
          *
-         * @param delay
-         *                milliseconds
+         * @param delay        in milliseconds
+	 * @param doJitter     Add +-1 second of jitter to the schedule?
+	 * @param fromLastPing Schedule relative to when the last ping was sent,
+	 *                     or relative to now?
          */
-        public void schedule(long delay, boolean doJitter) {
-            if (future == null)
-                lastScheduledTime = System.currentTimeMillis();
-            nextScheduledTime = lastScheduledTime + delay;
+        public void schedule(long delay, boolean doJitter, boolean fromLastPing) {
 
-            // log("bumping by " + delay);
             if (future != null)
                 future.cancel(true);
+
             int jitter = doJitter ? rand.nextInt(2000) - 1000 : 0;
-            future = scheduler.schedule(this, jitter + nextScheduledTime
-                    - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+	    long waitTime = fromLastPing ?
+		Math.max(0, (this.timestamp + delay + jitter) - System.currentTimeMillis()) :
+		delay + jitter;
+
+            future = scheduler.schedule(this, waitTime, TimeUnit.MILLISECONDS);
         }
 
         public void run() {
@@ -1276,7 +1278,7 @@ public class NeuRonNode extends Thread {
 	    }
 
 	    // TODO: probably too verbose -- comment out?
-	    log("pinging " + node.info.id + " try " + consecutiveUnansweredProbes+1);
+	    log("pinging " + node.info.id + " try " + (consecutiveUnansweredProbes+1));
 	    timestamp = pingPeer(node.info);
 	    consecutiveUnansweredProbes++;
 
@@ -1286,10 +1288,16 @@ public class NeuRonNode extends Thread {
 	    // once every 30 seconds until it comes up again (by successfully responding to
 	    // one of these pings). If we think failures are short lived, but the loss rate
 	    // is high, we might want to consider a different design choice.
-            int nextDelay = consecutiveUnansweredProbes >= fastProbeTries+1 ? probePeriod * 1000
-                    : fastProbePeriodMs;
-            lastScheduledTime = nextScheduledTime;
-            schedule(nextDelay, true);
+	    if(consecutiveUnansweredProbes <= fastProbeTries) {
+
+		// Keep trying fast probing -- no jitter desired.
+		schedule(fastProbePeriodMs, false, false);
+	    }
+	    else {
+
+		// Give up for a while
+		schedule(probePeriod * 1000, true, false);
+	    }
         }
     }
 
@@ -1319,7 +1327,7 @@ public class NeuRonNode extends Thread {
                         // probes
                         ProbeTask task = new ProbeTask(newNode);
                         probeFutures.put(node.id, task);
-                        task.schedule(rand.nextInt(probePeriod*1000), false);
+                        task.schedule(rand.nextInt(probePeriod*1000), false, false);
 
                         // subprobes
                         scheduler.schedule(new Runnable() {
@@ -1329,7 +1337,7 @@ public class NeuRonNode extends Thread {
                                 subprobeFutures.put(node.id, scheduler.schedule(this, subpingPeriod * 1000
                                         + jitter, TimeUnit.MILLISECONDS));
                             }
-                        }, rand.nextInt(subpingPeriod), TimeUnit.MILLISECONDS);
+                        }, rand.nextInt(subpingPeriod*1000), TimeUnit.MILLISECONDS);
                     }
 
 		    // Choose a subinterval for this node during which we will ping it
