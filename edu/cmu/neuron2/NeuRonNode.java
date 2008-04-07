@@ -130,7 +130,11 @@ public class NeuRonNode extends Thread {
     private final Runnable semAllJoined;
 
     private final Random rand = new Random();
-    private int SIM_ALIVE = 0;  // count of number of broadcast intervals to be dead
+
+    // TEST CODE
+    /*
+      private int SIM_ALIVE = 0;  // count of number of broadcast intervals to be dead
+    */
 
     private final InetAddress myCachedAddr;
     private ArrayList<Short> cachedMemberNids = new ArrayList<Short>(); // sorted list of members
@@ -2012,6 +2016,7 @@ public class NeuRonNode extends Thread {
 	// TEST CODE
 	// Stochastically decide whether to die...
 	// Put here just so that it is regular.
+	/*
 	if(SIM_ALIVE == 0) {
 
 	    if(rand.nextInt(100) > 90) {
@@ -2023,6 +2028,7 @@ public class NeuRonNode extends Thread {
 	    SIM_ALIVE--;
 	    log("Dying left: " + SIM_ALIVE);
 	}
+	*/
     }
 
     /**
@@ -2139,8 +2145,10 @@ public class NeuRonNode extends Thread {
 
 	// TEST CODE
 	// Stochastically decide whether to die...
-	if(SIM_ALIVE > 0)
+	/*
+	  if(SIM_ALIVE > 0)
 	    return 0;
+	*/
 
         o.src = myNid;
         o.version = currentStateVersion;
