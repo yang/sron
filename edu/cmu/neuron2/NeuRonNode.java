@@ -1608,7 +1608,17 @@ public class NeuRonNode extends Thread {
 	//       the measurements.
 	//       This assumes that the node's reachability is indicative
 	//       of its ability to send us recommendation messages.
-        return !n.isReachable || n.remoteFailures.contains(remote);
+
+	// It will take n some time to get measurements for a node which
+	// was recently added to the overlay. Don't pre-judge a remote
+	// rendezvous failure.
+	// TODO: cache much of this.
+	boolean ignorePossibleFailure = ((remote.timeAddedToOverlay +
+					  probePeriod*1000 + fastProbeTries*fastProbePeriodMs)
+					 < n.latenciesLastReceived);
+
+	return !n.isReachable || (!ignorePossibleFailure &&
+				  n.remoteFailures.contains(remote));
     }
 
     /**
@@ -1935,8 +1945,9 @@ public class NeuRonNode extends Thread {
 
 	if(lastKnownTime > 0) {
 
+	    // TODO: cache the max
 	    lastKnownTime = lastKnownTime -
-		Math.max(probePeriod, fastProbeTries*(fastProbePeriodMs/1000));
+		Math.max(probePeriod*1000, fastProbeTries*fastProbePeriodMs);
 	}
 
 	return lastKnownTime;
@@ -2464,7 +2475,12 @@ public class NeuRonNode extends Thread {
 	 * known to be alive.
 	 */
 	public long latenciesLastReceived = 0;
-	
+
+	/**
+	 * Time added to the overlay. This is useful for giving nodes enough
+	 * time to do measurements before assuming a remote failure.
+	 */
+	public final long timeAddedToOverlay = System.currentTimeMillis();
 
         /**
          * the recommended intermediate hop for us to get to this node, or 0 if
