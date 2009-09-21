@@ -17,7 +17,8 @@ The algorithm is designed to be resilient to both node and link failures.
 For more details, please refer to our paper, "Scaling all-pairs overlay routing
 to the thousands," which appears in [CoNext 2009].  This codebase is the
 published system that was developed to prototype and experimentally evaluate
-the algorithm on [PlanetLab].
+the algorithm on [PlanetLab].  It also contains simulation-driving code for
+operating the system in a non-distributed setting.
 
 [Resilient Overlay Networks]: http://nms.csail.mit.edu/ron/
 [CoNext 2009]: http://conferences.sigcomm.org/co-next/2009/
@@ -28,7 +29,11 @@ Getting Started
 
 The only requirement for this system is Java 6.
 
-To build, run `make`.
+To build, run `make`.  The main class is `RonTest`.  `make jar` generates a
+class jar for easy deployment.
+
+To run the system in a non-distributed simulation mode, refer to the
+`runsim.bash` and `sim.rb` scripts.
 
 The tool to regenerate the message type source code is `object-codegen` and is
 found here:
@@ -38,10 +43,19 @@ https://assorted.svn.sourceforge.net/svnroot/assorted/object-codegen/trunk/src
 Instead of adopting a serialization framework such as [Protocol Buffers], we
 chose to exercise greater control over a simpler serialization format.
 
+[Protocol Buffers]: http://code.google.com/p/protobuf/
+
+Todo
+====
+
+More detailed documentation regarding system usage (invocation parameters) and
+simulation tooling are forthcoming, as is API documentation.
+
 Eventually we will also release our PlanetLab-based experiment orchestration
 code to facilitate experiment re-creation.
 
-[Protocol Buffers]: http://code.google.com/p/protobuf/
+The reactor framework has been refactored out of this codebase into a separate
+project, but this change has not yet been reflected in the current code.
 
 People
 ======
