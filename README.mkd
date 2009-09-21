@@ -2,7 +2,7 @@ Scalable Resilient Overlay Networks
 ===================================
 
 The SRON project is a collaboration between researchers from MIT and CMU to
-make [Resilient Overlay Networks] scale up to hundreds of nodes by applying a
+make [Resilient Overlay Networks][] scale up to hundreds of nodes by applying a
 novel distributed algorithm for efficient (near-optimal) one-hop link-state
 routing in such full-mesh networks as RONs.  Prior techniques for this setting
 scale poorly, as each node incurs quadratic communication overhead to broadcast
@@ -15,9 +15,9 @@ shortest-path of arbitrary length using n-root-n-log-n per-node communication.
 The algorithm is designed to be resilient to both node and link failures.
 
 For more details, please refer to our paper, "Scaling all-pairs overlay routing
-to the thousands," which appears in [CoNext 2009].  This codebase is the
+to the thousands," which appears in [CoNext 2009][].  This codebase is the
 published system that was developed to prototype and experimentally evaluate
-the algorithm on [PlanetLab].  It also contains simulation-driving code for
+the algorithm on [PlanetLab][].  It also contains simulation-driving code for
 operating the system in a non-distributed setting.
 
 [Resilient Overlay Networks]: http://nms.csail.mit.edu/ron/
@@ -38,9 +38,9 @@ To run the system in a non-distributed simulation mode, refer to the
 The tool to regenerate the message type source code is `object-codegen` and is
 found here:
 
-https://assorted.svn.sourceforge.net/svnroot/assorted/object-codegen/trunk/src
+<https://assorted.svn.sourceforge.net/svnroot/assorted/object-codegen/trunk/src>
 
-Instead of adopting a serialization framework such as [Protocol Buffers], we
+Instead of adopting a serialization framework such as [Protocol Buffers][], we
 chose to exercise greater control over a simpler serialization format.
 
 [Protocol Buffers]: http://code.google.com/p/protobuf/
