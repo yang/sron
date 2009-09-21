@@ -15,9 +15,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
-import org.apache.mina.common.ThreadModel;
-import org.apache.mina.transport.socket.nio.DatagramAcceptor;
-
 import edu.cmu.neuron2.NeuRonNode.PlannedException;
 
 public class RonTest {
@@ -78,9 +75,6 @@ public class RonTest {
         }
         coordNode.port = basePort;
 
-        DatagramAcceptor acceptor = new DatagramAcceptor();
-        acceptor.getDefaultConfig().setThreadModel(ThreadModel.MANUAL);
-
         Runnable watchdog = new Runnable() {
             public void run() {
                 Logger.getLogger("").info("total time is up");
@@ -113,7 +107,7 @@ public class RonTest {
             for (short i = 0; i <= numNodes; i++) {
                 NeuRonNode node = new NeuRonNode(i, props, numNodes,
                         i == 0 ? semAllJoined : null, myCachedAddr,
-                        coordinatorHost, coordNode, acceptor, reactor);
+                        coordinatorHost, coordNode, reactor);
                 nodes.add(node);
                 node.run();
             }
@@ -121,7 +115,7 @@ public class RonTest {
             break;
         case DIST:
             NeuRonNode node = new NeuRonNode(nodeId, props, numNodes,
-                    semAllJoined, null, coordinatorHost, coordNode, acceptor, reactor);
+                    semAllJoined, null, coordinatorHost, coordNode, reactor);
             nodes.add(node);
             node.run();
 

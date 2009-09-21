@@ -16,10 +16,8 @@ compile: $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class
 $(CLASS_DIR):
 	mkdir -p $(CLASS_DIR)
 
-JAR_DEPS = ext/mina-core-1.1.2.jar:ext/slf4j-api-1.4.3.jar:ext/slf4j-simple-1.4.3.jar
-
 $(CLASS_DIR)/edu/cmu/neuron2/RonTest.class: $(CLASS_DIR) $(SRC_DIR)/edu/cmu/neuron2/*.java
-	$(JAVAC) -Xlint:unchecked -d $(CLASS_DIR) -classpath $(JAR_DEPS) $(JAVAC_FLAGS) $(SRC_DIR)/edu/cmu/neuron2/*.java
+	$(JAVAC) -Xlint:unchecked -d $(CLASS_DIR) $(JAVAC_FLAGS) $(SRC_DIR)/edu/cmu/neuron2/*.java
 
 clean: $(CLASS_DIR)
 	rm -rf $(CLASS_DIR)

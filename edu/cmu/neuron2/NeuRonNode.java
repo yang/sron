@@ -45,13 +45,6 @@ import java.util.logging.*;
 import java.util.logging.Formatter;
 import java.nio.ByteBuffer;
 
-//import org.apache.mina.common.ByteBuffer;
-import org.apache.mina.common.IoHandlerAdapter;
-import org.apache.mina.common.IoServiceConfig;
-import org.apache.mina.common.IoSession;
-import org.apache.mina.transport.socket.nio.DatagramAcceptor;
-import org.apache.mina.transport.socket.nio.DatagramAcceptorConfig;
-
 import edu.cmu.neuron2.RonTest.RunMode;
 
 class LabelFilter implements Filter {
@@ -169,8 +162,6 @@ public class NeuRonNode extends Thread {
     private final double smoothingFactor;
     private final short resetLatency = Short.MAX_VALUE;
 
-    private final DatagramAcceptor acceptor;
-
     private final Hashtable<Short, NodeInfo> coordNodes = new Hashtable<Short, NodeInfo>();
 
     private final ArrayList<Short> memberNids = new ArrayList<Short>();
@@ -210,7 +201,7 @@ public class NeuRonNode extends Thread {
     public NeuRonNode(short id,
                         Properties props, short numNodes, Runnable semJoined,
                         InetAddress myAddr, String coordinatorHost, NodeInfo coordNode,
-                        DatagramAcceptor acceptor, Reactor reactor) {
+                        Reactor reactor) {
 
         this.reactor = reactor;
 
@@ -247,8 +238,6 @@ public class NeuRonNode extends Thread {
         }
         gcPeriod = Integer.parseInt(props.getProperty("gcPeriod", neighborBroadcastPeriod + ""));
         enableSubpings = Boolean.valueOf(props.getProperty("enableSubpings", "true"));
-
-        this.acceptor = acceptor;
 
         // for simulations we can safely reduce the probing frequency, or even turn it off
         //if (mode == RunMode.SIM) {
@@ -473,26 +462,15 @@ public class NeuRonNode extends Thread {
                         //printGrid();
                     }
                 }), dumpPeriod, dumpPeriod);
-                if (false) {
-                    acceptor.bind(new InetSocketAddress(InetAddress
-                            .getLocalHost(), basePort), new CoordReceiver());
-                } else {
-                    final CoordHandler handler = new CoordHandler();
-                    session = reactor.register(null, myAddr, handler);
-                }
+                final CoordHandler handler = new CoordHandler();
+                session = reactor.register(null, myAddr, handler);
             } catch (Exception ex) {
                 throw new RuntimeException(ex);
             }
         } else {
             try {
-                if (false) {
-                    final Receiver receiver = new Receiver();
-                    acceptor.bind(new InetSocketAddress(myCachedAddr, myPort),
-                                                receiver);
-                } else {
-                    final NodeHandler handler = new NodeHandler();
-                    session = reactor.register(null, myAddr, handler);
-                }
+                final NodeHandler handler = new NodeHandler();
+                session = reactor.register(null, myAddr, handler);
 
                 log("server started on " + myCachedAddr + ":" + (basePort + myNid));
 
@@ -879,17 +857,6 @@ public class NeuRonNode extends Thread {
     }
 
 
-    /**
-     * coordinator's msg handling loop
-     */
-    public final class CoordReceiver extends IoHandlerAdapter {
-        @Override
-        public void messageReceived(IoSession session, Object obj)
-                throws Exception {
-            assert false;
-        }
-    }
-
     private int pingpongCount, pingpongBytes, subprobeCount, subprobeBytes;
 
     public final class NodeHandler implements ReactorHandler {
@@ -1042,17 +1009,6 @@ public class NeuRonNode extends Thread {
             }
         }
 
-    }
-
-    /**
-     * receiver's msg handling loop
-     */
-    public final class Receiver extends IoHandlerAdapter {
-        @Override
-        public void messageReceived(IoSession session, Object buf)
-                throws Exception {
-            assert false;
-        }
     }
 
     /**
