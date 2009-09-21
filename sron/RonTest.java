@@ -1,4 +1,4 @@
-package edu.cmu.neuron2;
+package sron;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -15,7 +15,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
-import edu.cmu.neuron2.NeuRonNode.PlannedException;
+import sron.NeuRonNode.PlannedException;
 
 public class RonTest {
 

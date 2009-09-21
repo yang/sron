@@ -1,4 +1,4 @@
-package edu.cmu.neuron2;
+package sron;
 
 import java.io.*;
 import java.net.*;
@@ -45,7 +45,7 @@ import java.util.logging.*;
 import java.util.logging.Formatter;
 import java.nio.ByteBuffer;
 
-import edu.cmu.neuron2.RonTest.RunMode;
+import sron.RonTest.RunMode;
 
 class LabelFilter implements Filter {
     private final HashSet<String> suppressedLabels;

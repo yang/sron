@@ -1,4 +1,4 @@
-package edu.cmu.neuron2;
+package sron;
 
 public class Pair<A extends Comparable<A>, B> implements Comparable<Pair<A, B>> {
 

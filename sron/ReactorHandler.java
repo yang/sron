@@ -1,4 +1,4 @@
-package edu.cmu.neuron2;
+package sron;
 
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
