@@ -1,11 +1,53 @@
-Requirements:
-- Apache Mina == 1.1.2 http://mina.apache.org/dyn/closer.cgi/mina/1.1.2/mina-1.1.2.tar.bz2
-  - references: mina-core, mina-filter-compression
-- SLF4J >= 1.3.0 http://www.slf4j.org/dist/slf4j-1.4.3.tar.gz
-  - references: slf4j-api, slf4j-simple
-- Java 5
+Scalable Resilient Overlay Networks
+===================================
+
+The SRON project is a collaboration between researchers from MIT and CMU to
+make [Resilient Overlay Networks] scale up to hundreds of nodes by applying a
+novel distributed algorithm for efficient (near-optimal) one-hop link-state
+routing in such full-mesh networks as RONs.  Prior techniques for this setting
+scale poorly, as each node incurs quadratic communication overhead to broadcast
+its link state to all other nodes.  In contrast, in our algorithm each node
+exchanges routing state with only a small subset of overlay nodes determined by
+using a quorum system.  Using a two-round protocol, each node can find an
+optimal one-hop path to any other node using only n-root-n per-node
+communication.  Our algorithm can also be used to find the optimal
+shortest-path of arbitrary length using n-root-n-log-n per-node communication.
+The algorithm is designed to be resilient to both node and link failures.
+
+For more details, please refer to our paper, "Scaling all-pairs overlay routing
+to the thousands," which appears in [CoNext 2009].  This codebase is the
+published system that was developed to prototype and experimentally evaluate
+the algorithm on [PlanetLab].
+
+[Resilient Overlay Networks]: http://nms.csail.mit.edu/ron/
+[CoNext 2009]: http://conferences.sigcomm.org/co-next/2009/
+[PlanetLab]: http://www.planet-lab.org/
+
+Getting Started
+===============
+
+The only requirement for this system is Java 6.
+
+To build, run `make`.
 
 The tool to regenerate the message type source code is `object-codegen` and is
 found here:
 
 https://assorted.svn.sourceforge.net/svnroot/assorted/object-codegen/trunk/src
+
+Instead of adopting a serialization framework such as [Protocol Buffers], we
+chose to exercise greater control over a simpler serialization format.
+
+Eventually we will also release our PlanetLab-based experiment orchestration
+code to facilitate experiment re-creation.
+
+[Protocol Buffers]: http://code.google.com/p/protobuf/
+
+People
+======
+
+- [David Andersen](http://www.cs.cmu.edu/~dga/) (CMU)
+- [David Karger](http://people.csail.mit.edu/karger/) (MIT)
+- [Amar Phanishayee](http://www.cs.cmu.edu/~amarp/) (CMU)
+- [David Sontag](http://people.csail.mit.edu/dsontag/) (MIT)
+- [Yang Zhang](http://www.mit.edu/~y_z/) (MIT)
